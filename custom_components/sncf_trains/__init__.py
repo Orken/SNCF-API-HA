@@ -25,6 +25,11 @@ from .const import (
 )
 from .coordinator import SncfUpdateCoordinator
 
+# Pré-chargement de la plateforme diagnostics : sans cela Home Assistant
+# l'importe à la demande dans la boucle d'événements et signale un appel
+# bloquant (« Detected blocking call to import_module ») au démarrage.
+from . import diagnostics  # noqa: F401
+
 type SncfDataConfigEntry = ConfigEntry[SncfUpdateCoordinator]
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.CALENDAR]
