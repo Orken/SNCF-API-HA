@@ -311,7 +311,9 @@ async def test_coordinator_survives_base_schedule_failure(hass):
 # Last train of the window
 # ---------------------------------------------------------------------------
 
-_WINDOW_END = dt_util.as_local(datetime(2026, 10, 14, 7, 0)).replace(hour=18, minute=30)
+def _window_end():
+    """18:30 local time, computed in the test's time zone."""
+    return datetime(2026, 10, 14, 18, 30, tzinfo=dt_util.get_default_time_zone())
 
 
 def test_last_train_of_window_cancelled_is_detected_when_realtime_complete():
@@ -319,7 +321,7 @@ def test_last_train_of_window_cancelled_is_detected_when_realtime_complete():
     base = realtime + [_journey("870502", "20261014T183000")]
 
     merged = merge_with_schedule(
-        realtime, base, window_end=_WINDOW_END, realtime_exhaustive=True
+        realtime, base, window_end=_window_end(), realtime_exhaustive=True
     )
 
     assert len(merged) == 2
@@ -331,7 +333,7 @@ def test_last_train_not_flagged_when_realtime_may_be_truncated():
     base = realtime + [_journey("870502", "20261014T183000")]
 
     merged = merge_with_schedule(
-        realtime, base, window_end=_WINDOW_END, realtime_exhaustive=False
+        realtime, base, window_end=_window_end(), realtime_exhaustive=False
     )
 
     assert len(merged) == 1
@@ -342,7 +344,7 @@ def test_planned_train_after_window_end_is_ignored():
     base = realtime + [_journey("870504", "20261014T190000")]
 
     merged = merge_with_schedule(
-        realtime, base, window_end=_WINDOW_END, realtime_exhaustive=True
+        realtime, base, window_end=_window_end(), realtime_exhaustive=True
     )
 
     assert len(merged) == 1
@@ -352,7 +354,7 @@ def test_whole_window_cancelled_with_empty_realtime():
     base = [_journey("870500", "20261014T170000")]
 
     merged = merge_with_schedule(
-        [], base, window_end=_WINDOW_END, realtime_exhaustive=True
+        [], base, window_end=_window_end(), realtime_exhaustive=True
     )
 
     assert [j[KEY_STATUS] for j in merged] == [STATUS_CANCELLED]
