@@ -25,6 +25,7 @@ from .const import (
     DEFAULT_OUTSIDE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
 )
+from .disruptions import merge_with_schedule
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -156,6 +157,41 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
 
         return new_interval
 
+    async def _fetch_base_schedule(
+        self,
+        departure: str,
+        arrival: str,
+        datetime_str: str,
+        title: str,
+    ) -> list[dict[str, Any]] | None:
+        """Fetch the planned timetable, without transfers. Never raises."""
+        try:
+            journeys = await self.api_client.fetch_journeys(
+                departure,
+                arrival,
+                datetime_str,
+                count=10,
+                data_freshness="base_schedule",
+            )
+        except ConfigEntryAuthFailed:
+            raise
+        except Exception as err:  # noqa: BLE001 - best effort, see caller
+            _LOGGER.debug(
+                "Horaires théoriques indisponibles pour '%s' : %s",
+                title,
+                err,
+            )
+            return None
+
+        if not isinstance(journeys, list):
+            return None
+
+        return [
+            journey
+            for journey in journeys
+            if isinstance(journey, dict) and journey.get("nb_transfers", 0) == 0
+        ]
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Récupère les données de l'API SNCF."""
 
@@ -209,11 +245,7 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                     if journeys is not None:
                         break
 
-                except (
-                    ClientError,
-                    asyncio.TimeoutError,
-                    RuntimeError,
-                ) as err:
+                except (TimeoutError, ClientError, RuntimeError) as err:
                     _LOGGER.warning(
                         "Erreur réseau lors de la récupération des trajets "
                         "(tentative %d/%d) : %s",
@@ -273,7 +305,26 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                 len(filtered_journeys),
             )
 
-            trains[subentry_id] = filtered_journeys
+            # ---------------------------------------------------------
+            # Trains supprimés
+            #
+            # En temps réel, l'API retire les trains supprimés au lieu
+            # de les signaler. On compare donc avec les horaires
+            # théoriques : un train prévu mais absent du temps réel est
+            # marqué comme supprimé. Appel « best effort » : en cas
+            # d'échec on garde simplement les données temps réel.
+            # ---------------------------------------------------------
+            base_journeys = await self._fetch_base_schedule(
+                departure,
+                arrival,
+                datetime_str,
+                entry.title,
+            )
+
+            trains[subentry_id] = merge_with_schedule(
+                filtered_journeys,
+                base_journeys,
+            )
 
         # -------------------------------------------------------------
         # Mise à jour de l'intervalle

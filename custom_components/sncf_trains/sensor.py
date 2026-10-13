@@ -18,6 +18,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SncfUpdateCoordinator
+from .disruptions import STATUS_CANCELLED, journey_status, main_disruption
 from .helpers import format_time, get_duration, get_train_num, parse_datetime
 
 
@@ -110,6 +111,18 @@ def get_transport_section(journey: dict[str, Any]) -> dict[str, Any]:
             return section
 
     return {}
+
+
+def disruption_attributes(journey: dict[str, Any], delay: int) -> dict[str, Any]:
+    """Status and disruption attributes for a journey."""
+    status = journey_status(journey, delay)
+    disruption = main_disruption(journey) or {}
+    return {
+        "status": status,
+        "cancelled": status == STATUS_CANCELLED,
+        "disruption_effect": disruption.get("effect"),
+        "disruption_message": disruption.get("message") or None,
+    }
 
 
 # -------------------------------------------------------------------------
@@ -331,6 +344,7 @@ class SncfTrainSensor(
                 "",
             ),
             "train_num": get_train_num(journey),
+            **disruption_attributes(journey, delay),
         }
 
 
@@ -380,8 +394,10 @@ class SncfAllTrainsLineSensor(
         departure_times = []
         base_departure_times = []
         delays = []
+        statuses = []
 
         overall_has_delay = False
+        cancelled_count = 0
 
         for journey in journeys:
             if not isinstance(journey, dict):
@@ -429,7 +445,12 @@ class SncfAllTrainsLineSensor(
 
             delays.append(str(delay))
 
-            if delay > 0:
+            status = journey_status(journey, delay)
+            statuses.append(status)
+
+            if status == STATUS_CANCELLED:
+                cancelled_count += 1
+            elif delay > 0:
                 overall_has_delay = True
 
         self._attr_extra_state_attributes = {
@@ -437,6 +458,8 @@ class SncfAllTrainsLineSensor(
             "base_departure_time": "; ".join(base_departure_times),
             "delay_minutes": "; ".join(delays),
             "has_delay": overall_has_delay,
+            "status": "; ".join(statuses),
+            "cancelled_count": cancelled_count,
         }
 
         self._attr_native_value = len(journeys)

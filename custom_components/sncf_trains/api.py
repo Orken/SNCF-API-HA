@@ -1,9 +1,11 @@
 import base64
 import logging
-from aiohttp import ClientSession, ClientTimeout, ClientError
-from typing import List, Optional, Mapping
+from collections.abc import Mapping
+
+from aiohttp import ClientError, ClientSession, ClientTimeout
 from homeassistant.exceptions import ConfigEntryAuthFailed
-import asyncio
+
+from .disruptions import attach_disruptions
 
 API_BASE = "https://api.sncf.com"
 _LOGGER = logging.getLogger(__name__)
@@ -23,7 +25,7 @@ class SncfApiClient:
 
     async def fetch_departures(
         self, stop_id: str, max_results: int = 10
-    ) -> Optional[List[dict]]:
+    ) -> list[dict] | None:
         if stop_id.startswith("stop_area:"):
             url = f"{API_BASE}/v1/coverage/sncf/stop_areas/{stop_id}/departures"
         elif stop_id.startswith("stop_point:"):
@@ -58,21 +60,33 @@ class SncfApiClient:
                 resp.raise_for_status()
                 data = await resp.json()
                 return data.get("departures", [])
-        except (ClientError, asyncio.TimeoutError) as err:
+        except (TimeoutError, ClientError) as err:
             _LOGGER.error("Network error fetching departures from SNCF API: %s", err)
             _LOGGER.debug("URL: %s, Params: %s", url, params)
             return None
 
     async def fetch_journeys(
-        self, from_id: str, to_id: str, datetime_str: str, count: int = 5
-    ) -> Optional[List[dict]]:
+        self,
+        from_id: str,
+        to_id: str,
+        datetime_str: str,
+        count: int = 5,
+        data_freshness: str = "realtime",
+    ) -> list[dict] | None:
+        """Fetch journeys between two places.
+
+        ``data_freshness`` is ``realtime`` (actual times, cancelled trains are
+        omitted by the API) or ``base_schedule`` (planned timetable).
+        The response disruptions are attached to each journey under
+        ``sncf_disruptions``.
+        """
         url = f"{API_BASE}/v1/coverage/sncf/journeys"
         params_raw: dict[str, object] = {
             "from": from_id,
             "to": to_id,
             "datetime": datetime_str,
             "count": count,
-            "data_freshness": "realtime",
+            "data_freshness": data_freshness,
             "datetime_represents": "departure",
         }
         params: Mapping[str, str] = {k: str(v) for k, v in params_raw.items()}
@@ -91,12 +105,15 @@ class SncfApiClient:
                     raise RuntimeError("Quota exceeded: 429 Too Many Requests.")
                 resp.raise_for_status()
                 data = await resp.json()
-                return data.get("journeys", [])
-        except (ClientError, asyncio.TimeoutError) as err:
+                journeys = data.get("journeys", [])
+                if isinstance(journeys, list):
+                    attach_disruptions(journeys, data.get("disruptions") or [])
+                return journeys
+        except (TimeoutError, ClientError) as err:
             _LOGGER.warning("Network error fetching journeys from SNCF API: %s", err)
             return None
 
-    async def search_stations(self, query: str) -> Optional[List[dict]]:
+    async def search_stations(self, query: str) -> list[dict] | None:
         url = f"{API_BASE}/v1/coverage/sncf/places"
         params_raw: dict[str, object] = {
             "q": query,
@@ -114,6 +131,6 @@ class SncfApiClient:
                 resp.raise_for_status()
                 data = await resp.json()
                 return data.get("places", [])
-        except (ClientError, asyncio.TimeoutError) as err:
+        except (TimeoutError, ClientError) as err:
             _LOGGER.error("Network error searching stations from SNCF API: %s", err)
             return None

@@ -7,7 +7,7 @@
 Suivez les horaires des trains SNCF entre deux gares dans Home Assistant, grâce à l’API officielle [SNCF](https://www.digital.sncf.com/startup/api).
 Départ / arrivée, retards, durée, mode (TER…), tout est intégré dans une interface configurable et traduite.
 
-> ⚠️ Ne prend pas en compte les trains supprimés.
+> ✅ Ce fork détecte les **trains supprimés** (voir « Trains supprimés et perturbations » ci-dessous).
 
 ---
 
@@ -82,6 +82,29 @@ Obtenez votre clé ici : https://numerique.sncf.com/startup/api/
 | `time_start` / `time_end` | Plage horaire de surveillance (ex. : `06:00` → `09:00`) |
 
 > 🕑 L'intervalle actif s'active automatiquement **2h avant** le début de plage.
+
+---
+
+## 🚫 Trains supprimés et perturbations
+
+En temps réel, l'API SNCF (Navitia) **retire** les trains supprimés de ses réponses au lieu de les signaler.
+Cette version interroge donc aussi les **horaires théoriques** (`data_freshness=base_schedule`) et les compare au temps réel :
+
+- un train prévu mais absent du temps réel (avant le dernier train temps réel renvoyé) est marqué **supprimé** ;
+- une perturbation `NO_SERVICE` sur le train le marque aussi comme supprimé.
+
+Nouveaux attributs sur chaque capteur de train :
+
+| Attribut | Description |
+|---|---|
+| `status` | `on_time`, `delayed` ou `cancelled` |
+| `cancelled` | `true` si le train est supprimé |
+| `disruption_effect` | Effet de la perturbation la plus grave (`NO_SERVICE`, `SIGNIFICANT_DELAYS`…) |
+| `disruption_message` | Message de la SNCF (ou cause) quand il existe |
+
+Le capteur « Tous les trains (ligne) » expose aussi `status` et `cancelled_count`, et le calendrier préfixe les trains supprimés par « ❌ Supprimé ».
+
+Coût : un appel API supplémentaire par trajet et par mise à jour (l'appel théorique est « best effort » : s'il échoue, seules les données temps réel sont utilisées).
 
 ---
 

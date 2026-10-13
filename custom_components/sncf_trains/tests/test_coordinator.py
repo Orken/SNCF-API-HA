@@ -64,6 +64,15 @@ def _create_subentry(
     return subentry
 
 
+def _realtime_calls(mock_fetch: AsyncMock) -> list:
+    """Calls made for realtime data (excludes the planned timetable call)."""
+    return [
+        call
+        for call in mock_fetch.await_args_list
+        if call.kwargs.get("data_freshness", "realtime") == "realtime"
+    ]
+
+
 @pytest.mark.asyncio
 async def test_coordinator_success(hass):
     """Test successful journey retrieval."""
@@ -112,14 +121,21 @@ async def test_coordinator_success(hass):
         ]
     }
 
-    mock_api.fetch_journeys.assert_awaited_once()
+    realtime_calls = _realtime_calls(mock_api.fetch_journeys)
+    assert len(realtime_calls) == 1
 
-    call_args = mock_api.fetch_journeys.await_args
+    call_args = realtime_calls[0]
     assert call_args.args[:2] == (
         "stop_area:dep",
         "stop_area:arr",
     )
     assert call_args.kwargs == {"count": 10}
+
+    # Planned timetable is fetched once to detect cancelled trains.
+    assert mock_api.fetch_journeys.await_count == 2
+    assert mock_api.fetch_journeys.await_args.kwargs["data_freshness"] == (
+        "base_schedule"
+    )
 
     assert coordinator.update_interval == timedelta(minutes=2)
 
@@ -295,7 +311,7 @@ async def test_coordinator_retries_runtime_error(hass):
         ]
     }
 
-    assert mock_api.fetch_journeys.await_count == 3
+    assert len(_realtime_calls(mock_api.fetch_journeys)) == 3
     assert mock_sleep.await_count == 2
     mock_sleep.assert_any_await(2)
 
@@ -349,7 +365,7 @@ async def test_coordinator_retries_timeout(hass):
         ]
     }
 
-    assert mock_api.fetch_journeys.await_count == 2
+    assert len(_realtime_calls(mock_api.fetch_journeys)) == 2
     mock_sleep.assert_awaited_once_with(2)
 
 
@@ -405,7 +421,7 @@ async def test_coordinator_retries_client_error(hass):
         ]
     }
 
-    assert mock_api.fetch_journeys.await_count == 2
+    assert len(_realtime_calls(mock_api.fetch_journeys)) == 2
     mock_sleep.assert_awaited_once_with(2)
 
 

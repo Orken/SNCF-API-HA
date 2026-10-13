@@ -18,6 +18,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SncfUpdateCoordinator
+from .disruptions import KEY_STATUS, STATUS_CANCELLED
 from .helpers import get_train_num, parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
@@ -259,6 +260,9 @@ class SNCFCalendar(
                     dep_name,
                     arr_name,
                 )
+
+                if journey.get(KEY_STATUS) == STATUS_CANCELLED:
+                    summary = f"❌ Supprimé – {summary}"
 
                 train_num = self._get_train_number(journey)
 
