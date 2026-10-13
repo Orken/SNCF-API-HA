@@ -112,6 +112,40 @@ Coût : un appel API supplémentaire par trajet et par mise à jour (l'appel th�
 
 ---
 
+## 🔔 Événement par train : `sncf_trains_status_changed`
+
+Les capteurs « Train 1…N » listent les **prochains départs** : ils se décalent quand un train part ou qu'une suppression s'insère. Pour réagir à un train **précis**, chaque train a un identifiant stable `train_uid` (numéro + date-heure prévue, ex. `870404_20261014T0816`) et l'intégration émet l'événement **`sncf_trains_status_changed`** quand son statut change :
+
+- train vu pour la première fois en retard ou supprimé ;
+- passage à l'heure / en retard / supprimé (dans un sens ou dans l'autre) ;
+- évolution du retard d'un train déjà en retard.
+
+Le dernier statut de chaque train est mémorisé sur disque : pas de doublon après un redémarrage.
+
+Données de l'événement : `train_uid`, `train_num`, `trip_title`, `departure_name`, `arrival_name`, `planned_departure`, `departure_time`, `arrival_time`, `status`, `previous_status`, `delay_minutes`, `disruption_effect`, `disruption_message`.
+
+Exemple de notification :
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: sncf_trains_status_changed
+    event_data:
+      status: cancelled
+actions:
+  - action: notify.mobile_app_mon_telephone
+    data:
+      title: "❌ Train supprimé"
+      message: >-
+        {{ trigger.event.data.departure_name }} → {{ trigger.event.data.arrival_name }}
+        {{ as_timestamp(trigger.event.data.planned_departure) | timestamp_custom('%H:%M') }} :
+        {{ trigger.event.data.disruption_message or 'supprimé' }}
+```
+
+Le nombre de capteurs « Train N » correspond toujours au nombre de trains demandé ; un créneau sans train reste vide.
+
+---
+
 ## 📊 Capteurs créés
 
 - `sensor.sncf_<gare_dep>_<gare_arr>` — capteur principal du trajet

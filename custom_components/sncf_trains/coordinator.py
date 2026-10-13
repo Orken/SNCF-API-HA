@@ -10,12 +10,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .api import SncfApiClient
 from .const import (
     CONF_API_KEY,
+    CONF_ARRIVAL_NAME,
+    CONF_DEPARTURE_NAME,
     CONF_FROM,
     CONF_OUTSIDE_INTERVAL,
     CONF_TIME_END,
@@ -26,8 +29,11 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
 )
 from .disruptions import merge_with_schedule, planned_departure
+from .tracking import EVENT_STATUS_CHANGED, detect_changes
 
 _LOGGER = logging.getLogger(__name__)
+
+STORAGE_VERSION = 1
 
 
 class SncfUpdateCoordinator(DataUpdateCoordinator):
@@ -37,6 +43,11 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         """Initialisation."""
         self.entry = entry
         self.api_client = None
+
+        # Dernier statut connu de chaque train (clé : train_uid), persisté
+        # pour ne pas ré-annoncer les mêmes changements après un redémarrage.
+        self.train_states: dict[str, dict[str, Any]] = {}
+        self._store: Store | None = None
 
         self.update_interval_minutes = entry.options.get(
             CONF_UPDATE_INTERVAL,
@@ -58,6 +69,15 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
     async def _async_setup(self) -> None:
         """Paramétrage du coordinateur."""
         api_key = self.entry.data[CONF_API_KEY]
+
+        self._store = Store(
+            self.hass,
+            STORAGE_VERSION,
+            f"sncf_trains.{self.entry.entry_id}.train_states",
+        )
+        stored = await self._store.async_load()
+        if isinstance(stored, dict):
+            self.train_states = stored
 
         try:
             session = async_get_clientsession(self.hass)
@@ -399,4 +419,36 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                     self.update_interval.total_seconds() / 60,
                 )
 
+        self._track_changes(trains)
+
         return trains
+
+    def _track_changes(self, trains: dict[str, list[dict[str, Any]]]) -> None:
+        """Émet un événement par train dont le statut a changé."""
+        trip_info = {}
+        for subentry_id in trains:
+            subentry = self.entry.subentries.get(subentry_id)
+            data = getattr(subentry, "data", {}) or {}
+            trip_info[subentry_id] = {
+                "trip_title": getattr(subentry, "title", ""),
+                "departure_name": data.get(CONF_DEPARTURE_NAME, ""),
+                "arrival_name": data.get(CONF_ARRIVAL_NAME, ""),
+            }
+
+        now = dt_util.now()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt_util.get_default_time_zone())
+
+        events, self.train_states = detect_changes(
+            self.train_states,
+            trains,
+            trip_info,
+            now,
+        )
+
+        for event in events:
+            _LOGGER.debug("Changement de statut : %s", event)
+            self.hass.bus.async_fire(EVENT_STATUS_CHANGED, event)
+
+        if self._store is not None:
+            self._store.async_delay_save(lambda: self.train_states, 10)

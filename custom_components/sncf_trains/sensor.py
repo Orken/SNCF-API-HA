@@ -15,11 +15,14 @@ from .const import (
     CONF_DEPARTURE_NAME,
     CONF_FROM,
     CONF_TO,
+    CONF_TRAIN_COUNT,
+    DEFAULT_TRAIN_COUNT,
     DOMAIN,
 )
 from .coordinator import SncfUpdateCoordinator
 from .disruptions import STATUS_CANCELLED, journey_status, main_disruption
 from .helpers import format_time, get_duration, get_train_num, parse_datetime
+from .tracking import journey_uid
 
 
 async def async_setup_entry(
@@ -38,12 +41,11 @@ async def async_setup_entry(
     )
 
     for subentry in entry.subentries.values():
-        journeys = coordinator.data.get(subentry.subentry_id, [])
-
-        display_count = min(
-            len(journeys),
-            subentry.data.get("train_count", 0),
-        )
+        # On crée toujours le nombre de capteurs demandé : un créneau sans
+        # train reste vide au lieu de ne jamais être créé (sinon, si l'API
+        # renvoie peu de trains au démarrage, des capteurs manquent jusqu'au
+        # prochain rechargement).
+        display_count = subentry.data.get(CONF_TRAIN_COUNT, DEFAULT_TRAIN_COUNT)
 
         sensors = []
 
@@ -205,9 +207,10 @@ class SncfTrainSensor(
         self.jid = journey_id
 
         entry = self.coordinator.entry.subentries[train_id]
-        journey = coordinator.data[train_id][journey_id]
+        journeys = (coordinator.data or {}).get(train_id, [])
+        journey = journeys[journey_id] if journey_id < len(journeys) else None
 
-        section = get_transport_section(journey)
+        section = get_transport_section(journey) if journey else {}
 
         departure_time = parse_datetime(section.get("base_departure_date_time", ""))
 
@@ -221,7 +224,9 @@ class SncfTrainSensor(
 
         self._attr_unique_id = f"{entry.subentry_id}_{journey_id}"
 
-        self._attr_extra_state_attributes = self._extra_attributes(journey)
+        self._attr_extra_state_attributes = (
+            self._extra_attributes(journey) if journey else {}
+        )
 
         self._attr_device_info = {
             "identifiers": {
@@ -344,6 +349,7 @@ class SncfTrainSensor(
                 "",
             ),
             "train_num": get_train_num(journey),
+            "train_uid": journey_uid(journey),
             **disruption_attributes(journey, delay),
         }
 
