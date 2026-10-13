@@ -6,6 +6,7 @@ Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), b
 
 ### Corrections
 - **« Configuration error » intermittent** : la carte est déclarée dès le chargement de l'intégration (et non plus à la fin du démarrage), et ne réinterroge plus tout le registre des entités à chaque changement d'état de la maison (elle utilise `hass.entities`).
+- **Carte enregistrée comme ressource Lovelace** (mode stockage), comme les cartes HACS, avec la version dans l'adresse : le navigateur ne peut plus servir une page en cache sans la carte, ni une ancienne version de la carte.
 
 ## 1.4.1
 

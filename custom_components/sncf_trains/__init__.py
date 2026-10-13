@@ -3,13 +3,16 @@
 from pathlib import Path
 from types import MappingProxyType
 from logging import getLogger
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers.entity_registry import Platform
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.helpers import config_validation as cv
+from homeassistant.loader import async_get_integration
 
 from .const import (
     CONF_API_KEY,
@@ -42,16 +45,71 @@ LOGGER = getLogger(__name__)
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up SNCF Trains component — register the Lovelace card.
 
-    The card is registered right away (``frontend`` and ``http`` are loaded
-    first): waiting for ``EVENT_HOMEASSISTANT_STARTED`` meant a browser
-    opening the dashboard during start-up got a page without the card, and
-    Lovelace showed "Configuration error" until the next full reload.
+    The card file is served right away and declared two ways:
+
+    * as a Lovelace resource (storage mode), like HACS cards: the frontend
+      fetches the resource list on every dashboard load, so the card is
+      always there even when the browser serves a cached copy of the page;
+    * through ``add_extra_js_url`` as a fallback (YAML resource mode).
+
+    The URL carries the integration version so a new release is never
+    served from the browser cache.
     """
+    integration = await async_get_integration(hass, DOMAIN)
+    card_url = f"{CARD_URL}?v={integration.version}"
+
     await hass.http.async_register_static_paths(
         [StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)]
     )
-    add_extra_js_url(hass, CARD_URL)
+    add_extra_js_url(hass, card_url)
+
+    async def _register_resource(_event: Any = None) -> None:
+        try:
+            await _async_register_lovelace_resource(hass, card_url)
+        except Exception:  # noqa: BLE001 - never block the integration
+            LOGGER.warning(
+                "Impossible d'enregistrer la carte comme ressource Lovelace ; "
+                "ajoutez %s (module) dans les ressources du tableau de bord",
+                card_url,
+                exc_info=True,
+            )
+
+    if hass.state == CoreState.running:
+        await _register_resource()
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_resource)
+
     return True
+
+
+async def _async_register_lovelace_resource(hass: HomeAssistant, card_url: str) -> None:
+    """Create or update the card's Lovelace resource (storage mode only)."""
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None or getattr(lovelace, "resource_mode", None) != "storage":
+        return
+    resources = lovelace.resources
+    if not resources.loaded:
+        await resources.async_load()
+        resources.loaded = True
+
+    existing = [
+        item
+        for item in resources.async_items()
+        if str(item.get("url", "")).split("?", 1)[0] == CARD_URL
+    ]
+    if not existing:
+        await resources.async_create_item({"res_type": "module", "url": card_url})
+        LOGGER.debug("Ressource Lovelace ajoutée : %s", card_url)
+        return
+
+    first, *duplicates = existing
+    if first.get("url") != card_url:
+        await resources.async_update_item(
+            first["id"], {"res_type": "module", "url": card_url}
+        )
+        LOGGER.debug("Ressource Lovelace mise à jour : %s", card_url)
+    for item in duplicates:
+        await resources.async_delete_item(item["id"])
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: SncfDataConfigEntry) -> bool:

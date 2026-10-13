@@ -903,6 +903,7 @@ class SncfTrainCard extends HTMLElement {
 // Définir l'élément custom
 if (!customElements.get('sncf-train-card')) {
   customElements.define('sncf-train-card', SncfTrainCard);
+  console.info('%c SNCF-TRAIN-CARD %c chargée ', 'color:#fff;background:#8c1d40;font-weight:700', 'color:#8c1d40');
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: 'sncf-train-card',
