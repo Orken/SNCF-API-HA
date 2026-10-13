@@ -8,6 +8,22 @@ globalThis.customCards.push({
   configurable: true
 });
 
+// Valeurs par défaut appliquées à toute configuration (et pas seulement dans
+// l'éditeur) : sans elles, les gares et horaires étaient masqués et le
+// minuteur de rafraîchissement tournait sans intervalle.
+const SNCF_CARD_DEFAULTS = {
+  title: 'Trains SNCF',
+  train_lines: 5,
+  animation_duration: 30,
+  update_interval: 30000,
+  train_emoji_axial_symmetry: true,
+  train_emoji: '🚅',
+  show_departure_station: true,
+  departure_station_emoji: '',
+  show_arrival_station: true,
+  arrival_station_emoji: '🚉',
+};
+
 class SncfTrainCard extends HTMLElement {
   constructor() {
     super();
@@ -45,7 +61,7 @@ class SncfTrainCard extends HTMLElement {
     const deviceIdChanged = previousDeviceId && JSON.stringify(previousDeviceId) !== JSON.stringify(normalizedDeviceId);
 
     // Créer une copie de la config avec le device_id normalisé
-    this.config = { ...config, device_id: normalizedDeviceId };
+    this.config = { ...SNCF_CARD_DEFAULTS, ...config, device_id: normalizedDeviceId };
 
     // Forcer la mise à jour immédiate si device_id a changé
     if (deviceIdChanged) {
@@ -189,16 +205,7 @@ class SncfTrainCard extends HTMLElement {
   static getStubConfig() {
     return {
       device_id: ['', ''],
-      title: 'Trains SNCF',
-      train_lines: 5,
-      animation_duration: 30,
-      update_interval: 30000,
-      train_emoji_axial_symmetry: true,
-      train_emoji: '🚅',
-      show_departure_station: true,
-      departure_station_emoji: '',
-      show_arrival_station: true,
-      arrival_station_emoji: '🚉',
+      ...SNCF_CARD_DEFAULTS,
     };
   }
 
@@ -240,7 +247,7 @@ class SncfTrainCard extends HTMLElement {
    * Calcule la taille de la carte en fonction du nombre de lignes de train à afficher, avec une taille minimale pour éviter les problèmes d'affichage
    */
   getCardSize() {
-    return Math.max(3, this.config.train_lines + 1);
+    return Math.max(3, (this.config?.train_lines ?? SNCF_CARD_DEFAULTS.train_lines) + 1);
   }
 
   /**
@@ -284,13 +291,18 @@ class SncfTrainCard extends HTMLElement {
    */
   startUpdateTimer() {
     this.stopUpdateTimer();
+    // connectedCallback peut précéder setConfig : pas de config, pas de timer.
+    if (!this.config) {
+      return;
+    }
+    const interval = Math.max(5000, Number(this.config.update_interval) || SNCF_CARD_DEFAULTS.update_interval);
     this.updateInterval = setInterval(async () => {
       if (this._hass) {
         // Force un nouveau rendu à intervalles réguliers pour capturer les changements
         this._lastRenderTime = 0; // Reset du throttle
         await this.render();
       }
-    }, this.config.update_interval);
+    }, interval);
   }
 
   /**
@@ -566,6 +578,15 @@ class SncfTrainCard extends HTMLElement {
    * @param {Array} trains - Un tableau d'entités de train à afficher, avec leurs attributs contenant les informations nécessaires pour le rendu
    * @returns {string} Une chaîne HTML représentant la section complète du train
    */
+  /**
+   * Train supprimé (attributs « cancelled » / « status » de l'intégration).
+   * @param {object} trainAttributes - Les attributs du train
+   * @returns {boolean}
+   */
+  isCancelled(trainAttributes) {
+    return trainAttributes?.cancelled === true || trainAttributes?.status === 'cancelled';
+  }
+
   renderTrainLines(trains) {
     return trains.map((train, index) => {
       const TA = train.attributes;
@@ -575,14 +596,15 @@ class SncfTrainCard extends HTMLElement {
       const isRunning = this.parseTime(TA.departure_time) < new Date() && new Date() < this.parseTime(TA.arrival_time)
       const isArrived = new Date() > this.parseTime(TA.arrival_time)
       const trainColor = this.getTrainColor(delayMinutes, hasDelay);
+      const isCancelled = this.isCancelled(TA);
 
-      const theme = isArrived ? 'arrived' : hasDelay ? 'delayed' : isRunning ? 'running' : '';
+      const theme = isCancelled ? 'cancelled' : isArrived ? 'arrived' : hasDelay ? 'delayed' : isRunning ? 'running' : '';
       return `
         <div class="train-line">
           ${this.config.show_departure_station ? this.renderDeparture(TA) : ''}
 
           <div class="train-track ${theme}">
-            ${ position >= 0 ?
+            ${ position >= 0 && !isCancelled ?
             `<div class="train-emoji train-emoji-axial-symmetry-${this.config.train_emoji_axial_symmetry}"
               style="left: ${position}%; color: ${trainColor};">
                 ${this.renderIcone(this.config.train_emoji)}
@@ -619,8 +641,8 @@ class SncfTrainCard extends HTMLElement {
               <div class="arrival-time">${departureTime}</div>
             `}
           </div>
-          <div class="delay-info ${hasDelay ? 'delay' : 'on-time'}">
-            ${hasDelay ? `+${delayMinutes}min` : isGone ? 'Parti' : 'À l\'heure'}
+          <div class="delay-info ${this.isCancelled(trainAttributes) ? 'cancelled' : hasDelay ? 'delay' : 'on-time'}">
+            ${this.isCancelled(trainAttributes) ? 'Supprimé' : hasDelay ? `+${delayMinutes}min` : isGone ? 'Parti' : 'À l\'heure'}
           </div>
         </div>
         <div class="station-emoji">${this.renderIcone(this.config.departure_station_emoji)}</div>
@@ -652,8 +674,8 @@ class SncfTrainCard extends HTMLElement {
               <div class="arrival-time">${arrivalTime}</div>
             `}
           </div>
-          <div class="delay-info ${hasDelay ? 'delay' : 'on-time'}">
-            ${hasDelay ? `+${delayMinutes}min` : isArrived ? 'Arrivé' : 'À l\'heure'}
+          <div class="delay-info ${this.isCancelled(trainAttributes) ? 'cancelled' : hasDelay ? 'delay' : 'on-time'}">
+            ${this.isCancelled(trainAttributes) ? 'Supprimé' : hasDelay ? `+${delayMinutes}min` : isArrived ? 'Arrivé' : 'À l\'heure'}
           </div>
         </div>
       </div>
@@ -839,6 +861,16 @@ class SncfTrainCard extends HTMLElement {
 
         .on-time {
           color: var(--success-color, #4caf50);
+        }
+
+        .cancelled {
+          color: var(--error-color, #f44336);
+        }
+
+        .train-track.cancelled {
+          background: repeating-linear-gradient(90deg, #ef9a9a 0 8px, transparent 8px 16px);
+          box-shadow: none;
+          opacity: 0.6;
         }
 
         .error {
