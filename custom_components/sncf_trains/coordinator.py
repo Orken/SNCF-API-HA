@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from aiohttp import ClientError
@@ -25,7 +25,7 @@ from .const import (
     DEFAULT_OUTSIDE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
 )
-from .disruptions import merge_with_schedule
+from .disruptions import merge_with_schedule, planned_departure
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,8 +73,55 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             )
             raise UpdateFailed(err) from err
 
+    def _window_end(self, time_start, time_end) -> datetime:
+        """Fin de la plage horaire correspondant au paramètre datetime envoyé.
+
+        Même logique de jour que `_build_datetime_param` : si la plage du
+        jour est passée, on regarde celle du lendemain. Une plage qui
+        traverse minuit (fin <= début) se termine le lendemain du début.
+        """
+        start = datetime.strptime(
+            self._build_datetime_param(time_start, time_end),
+            "%Y%m%dT%H%M%S",
+        )
+
+        h_start, m_start = map(int, time_start.split(":"))
+        h_end, m_end = map(int, time_end.split(":"))
+
+        end = start.replace(hour=h_end, minute=m_end)
+
+        if (h_end, m_end) <= (h_start, m_start):
+            end += timedelta(days=1)
+
+        tz = dt_util.now().tzinfo or dt_util.get_default_time_zone()
+        return end.replace(tzinfo=tz)
+
+    @staticmethod
+    def _filter_by_window(
+        journeys: list[dict[str, Any]],
+        window_end: datetime,
+    ) -> list[dict[str, Any]]:
+        """Garde les trains dont le départ prévu est dans la plage horaire.
+
+        Le début de plage est déjà appliqué par l'API (paramètre datetime) ;
+        on retire ici les trains qui partent après la fin de plage. Un
+        trajet sans date exploitable est conservé.
+        """
+        kept = []
+        for journey in journeys:
+            dep = planned_departure(journey)
+            if dep is not None and dep.tzinfo is None:
+                dep = dep.replace(tzinfo=window_end.tzinfo)
+            if dep is None or dep <= window_end:
+                kept.append(journey)
+        return kept
+
     def _build_datetime_param(self, time_start, time_end) -> str:
-        """Construit le paramètre datetime pour l'API."""
+        """Construit le paramètre datetime pour l'API.
+
+        Renvoie le début de la plage en cours ou à venir. Une plage qui
+        traverse minuit (fin <= début) se termine le lendemain de son début.
+        """
         now = dt_util.now()
 
         h_start, m_start = map(int, time_start.split(":"))
@@ -87,12 +134,15 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             microsecond=0,
         )
 
-        dt_end = now.replace(
-            hour=h_end,
-            minute=m_end,
-            second=0,
-            microsecond=0,
-        )
+        dt_end = dt_start.replace(hour=h_end, minute=m_end)
+
+        if (h_end, m_end) <= (h_start, m_start):
+            dt_end += timedelta(days=1)
+
+            # Plage de la veille encore en cours (ex. 00:30 pour 22:00-01:00)
+            if now < dt_end - timedelta(days=1):
+                dt_start -= timedelta(days=1)
+                dt_end -= timedelta(days=1)
 
         if now > dt_end:
             dt_start += timedelta(days=1)
@@ -321,9 +371,18 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                 entry.title,
             )
 
-            trains[subentry_id] = merge_with_schedule(
+            merged = merge_with_schedule(
                 filtered_journeys,
                 base_journeys,
+            )
+
+            # ---------------------------------------------------------
+            # Plage horaire : on ne garde que les trains qui partent
+            # avant l'heure de fin configurée.
+            # ---------------------------------------------------------
+            trains[subentry_id] = self._filter_by_window(
+                merged,
+                self._window_end(time_start, time_end),
             )
 
         # -------------------------------------------------------------

@@ -265,8 +265,9 @@ async def test_coordinator_reports_cancelled_train(hass):
     ):
         data = await coordinator._async_update_data()
 
+    # 09:49 is planned after the 09:00 end of the window: filtered out.
     statuses = [j.get(KEY_STATUS) for j in data["sub"]]
-    assert statuses == [None, STATUS_CANCELLED, None]
+    assert statuses == [None, STATUS_CANCELLED]
 
 
 @pytest.mark.asyncio
