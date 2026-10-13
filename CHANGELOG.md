@@ -2,6 +2,11 @@
 
 Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), basé sur la 1.3.3.
 
+## 1.4.1
+
+### Corrections
+- **Carte Lovelace `sncf-train-card`** : les valeurs par défaut n'étaient jamais appliquées, si bien que les horaires de départ et d'arrivée restaient masqués et que le rafraîchissement tournait sans délai. Elle affiche aussi désormais les trains supprimés.
+
 ## 1.4.0
 
 ### Nouveautés
