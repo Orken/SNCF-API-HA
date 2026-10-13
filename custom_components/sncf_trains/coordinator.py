@@ -46,6 +46,9 @@ STORAGE_VERSION = 1
 # réparation « API injoignable » (évite les alertes sur un incident bref).
 FAILURES_BEFORE_ISSUE = 3
 
+# Nombre de trajets demandés à l'API par appel.
+JOURNEY_COUNT = 10
+
 
 class SncfUpdateCoordinator(DataUpdateCoordinator):
     """Coordonnateur pour récupérer les données des trajets SNCF."""
@@ -254,7 +257,7 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                 departure,
                 arrival,
                 datetime_str,
-                count=10,
+                count=JOURNEY_COUNT,
                 data_freshness="base_schedule",
             )
         except ConfigEntryAuthFailed:
@@ -325,7 +328,7 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                         departure,
                         arrival,
                         datetime_str,
-                        count=10,
+                        count=JOURNEY_COUNT,
                     )
 
                     if journeys is not None:
@@ -460,6 +463,9 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                 filtered_journeys,
                 base_journeys,
                 arrival,
+                window_end=self._window_end(time_start, time_end),
+                # Moins de résultats que demandé : rien n'a été tronqué.
+                realtime_exhaustive=len(journeys) < JOURNEY_COUNT,
             )
 
             # Train qui ne dessert plus la gare d'arrivée : information

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.util import dt as dt_util
 
 from custom_components.sncf_trains.const import (
     CONF_API_KEY,
@@ -304,3 +305,54 @@ async def test_coordinator_survives_base_schedule_failure(hass):
         data = await coordinator._async_update_data()
 
     assert data == {"sub": realtime}
+
+
+# ---------------------------------------------------------------------------
+# Last train of the window
+# ---------------------------------------------------------------------------
+
+_WINDOW_END = dt_util.as_local(datetime(2026, 10, 14, 7, 0)).replace(hour=18, minute=30)
+
+
+def test_last_train_of_window_cancelled_is_detected_when_realtime_complete():
+    realtime = [_journey("870500", "20261014T170000")]
+    base = realtime + [_journey("870502", "20261014T183000")]
+
+    merged = merge_with_schedule(
+        realtime, base, window_end=_WINDOW_END, realtime_exhaustive=True
+    )
+
+    assert len(merged) == 2
+    assert merged[1][KEY_STATUS] == STATUS_CANCELLED
+
+
+def test_last_train_not_flagged_when_realtime_may_be_truncated():
+    realtime = [_journey("870500", "20261014T170000")]
+    base = realtime + [_journey("870502", "20261014T183000")]
+
+    merged = merge_with_schedule(
+        realtime, base, window_end=_WINDOW_END, realtime_exhaustive=False
+    )
+
+    assert len(merged) == 1
+
+
+def test_planned_train_after_window_end_is_ignored():
+    realtime = [_journey("870500", "20261014T170000")]
+    base = realtime + [_journey("870504", "20261014T190000")]
+
+    merged = merge_with_schedule(
+        realtime, base, window_end=_WINDOW_END, realtime_exhaustive=True
+    )
+
+    assert len(merged) == 1
+
+
+def test_whole_window_cancelled_with_empty_realtime():
+    base = [_journey("870500", "20261014T170000")]
+
+    merged = merge_with_schedule(
+        [], base, window_end=_WINDOW_END, realtime_exhaustive=True
+    )
+
+    assert [j[KEY_STATUS] for j in merged] == [STATUS_CANCELLED]

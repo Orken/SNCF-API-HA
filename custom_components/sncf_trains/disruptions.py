@@ -239,6 +239,8 @@ def merge_with_schedule(
     realtime: list[dict[str, Any]],
     base_schedule: list[dict[str, Any]] | None,
     arrival_id: str | None = None,
+    window_end: datetime | None = None,
+    realtime_exhaustive: bool = False,
 ) -> list[dict[str, Any]]:
     """Merge realtime journeys with the planned timetable.
 
@@ -247,7 +249,10 @@ def merge_with_schedule(
 
     * a disruption explicitly says the train has no service, or
     * it was planned before the last realtime train (so it is not simply
-      beyond the number of results requested).
+      beyond the number of results requested), or
+    * ``realtime_exhaustive`` is true (the realtime answer had fewer results
+      than requested, so nothing was cut off) and it was planned before
+      ``window_end``.
 
     Exception: a planned train missing only because a disruption removed
     its stop at ``arrival_id`` is added back flagged "destination not
@@ -284,6 +289,19 @@ def merge_with_schedule(
         within_range = (
             latest_realtime is not None and dep is not None and dep <= latest_realtime
         )
+        # Le temps réel a tout renvoyé (moins de résultats que demandé) :
+        # un train prévu dans la plage horaire mais absent est supprimé,
+        # même s'il est après le dernier train temps réel (ex. le dernier
+        # train de la plage).
+        if (
+            not within_range
+            and realtime_exhaustive
+            and window_end is not None
+            and dep is not None
+        ):
+            if dep.tzinfo is None:
+                dep = dep.replace(tzinfo=window_end.tzinfo)
+            within_range = dep <= window_end
         if not (confirmed or stop_deleted or within_range):
             continue
         added = dict(journey)
