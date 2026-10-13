@@ -93,6 +93,10 @@ Cette version interroge donc aussi les **horaires théoriques** (`data_freshness
 - un train prévu mais absent du temps réel (avant le dernier train temps réel renvoyé) est marqué **supprimé** ;
 - une perturbation `NO_SERVICE` sur le train le marque aussi comme supprimé.
 
+![Train supprimé détecté sur un tableau de bord (tuile « ❌ Supprimé · Indisponibilité d'un matériel »)](./assets/trains_supprimes.png)
+
+_Exemple : le train de 08:16, masqué par l'API temps réel, est affiché comme supprimé avec le motif communiqué par la SNCF._
+
 Nouveaux attributs sur chaque capteur de train :
 
 | Attribut | Description |
