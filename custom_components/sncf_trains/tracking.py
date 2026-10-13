@@ -37,18 +37,40 @@ def journey_uid(journey: dict[str, Any]) -> str | None:
     return f"{key[0]}_{key[1]}" if key else None
 
 
-def journey_delay(journey: dict[str, Any]) -> int:
-    """Delay in minutes at arrival (realtime arrival - planned arrival)."""
-    section: dict[str, Any] = {}
+def _pt_section(journey: dict[str, Any]) -> dict[str, Any]:
     for candidate in journey.get("sections") or []:
         if isinstance(candidate, dict) and candidate.get("type") == "public_transport":
-            section = candidate
-            break
-    arr = parse_datetime(journey.get("arrival_date_time", ""))
-    base_arr = parse_datetime(section.get("base_arrival_date_time", ""))
-    if arr and base_arr:
-        return int((arr - base_arr).total_seconds() / 60)
+            return candidate
+    return {}
+
+
+def _minutes(real: str, base: str) -> int:
+    real_dt = parse_datetime(real or "")
+    base_dt = parse_datetime(base or "")
+    if real_dt and base_dt:
+        return int((real_dt - base_dt).total_seconds() / 60)
     return 0
+
+
+def journey_departure_delay(journey: dict[str, Any]) -> int:
+    """Delay in minutes at departure (realtime - planned)."""
+    return _minutes(
+        journey.get("departure_date_time", ""),
+        _pt_section(journey).get("base_departure_date_time", ""),
+    )
+
+
+def journey_arrival_delay(journey: dict[str, Any]) -> int:
+    """Delay in minutes at arrival (realtime - planned)."""
+    return _minutes(
+        journey.get("arrival_date_time", ""),
+        _pt_section(journey).get("base_arrival_date_time", ""),
+    )
+
+
+def journey_delay(journey: dict[str, Any]) -> int:
+    """Delay retained for a train: the larger of departure and arrival delays."""
+    return max(journey_departure_delay(journey), journey_arrival_delay(journey))
 
 
 def detect_changes(
@@ -114,6 +136,8 @@ def detect_changes(
                 "planned_departure": dep.isoformat(),
                 "status": status,
                 "delay_minutes": delay,
+                "departure_delay_minutes": journey_departure_delay(journey),
+                "arrival_delay_minutes": journey_arrival_delay(journey),
                 "destination_served": served,
             }
             state[uid] = record

@@ -29,8 +29,14 @@ from .disruptions import (
     journey_status,
     main_disruption,
 )
-from .helpers import format_time, get_duration, get_train_num, parse_datetime
-from .tracking import journey_uid
+from .helpers import (
+    format_time,
+    get_duration,
+    get_train_num,
+    parse_datetime,
+    short_station_name,
+)
+from .tracking import journey_departure_delay, journey_uid
 
 
 async def async_setup_entry(
@@ -123,6 +129,20 @@ def get_transport_section(journey: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def trip_device_info(subentry: Any) -> dict[str, Any]:
+    """One device per journey, named after its stations."""
+    data = getattr(subentry, "data", {}) or {}
+    dep = short_station_name(data.get(CONF_DEPARTURE_NAME, ""))
+    arr = short_station_name(data.get(CONF_ARRIVAL_NAME, ""))
+    return {
+        "identifiers": {(DOMAIN, subentry.subentry_id)},
+        "name": f"SNCF {dep} → {arr}" if dep and arr else "SNCF",
+        "manufacturer": "SNCF",
+        "model": "Trajet",
+        "entry_type": DeviceEntryType.SERVICE,
+    }
+
+
 def disruption_attributes(journey: dict[str, Any], delay: int) -> dict[str, Any]:
     """Status and disruption attributes for a journey.
 
@@ -170,8 +190,8 @@ class SncfJourneySensor(
             "identifiers": {
                 (DOMAIN, coordinator.entry.entry_id),
             },
-            "name": "SNCF",
-            "manufacturer": "Master13011",
+            "name": "SNCF Trains",
+            "manufacturer": "SNCF",
             "model": "API",
             "entry_type": DeviceEntryType.SERVICE,
         }
@@ -228,9 +248,6 @@ class SncfTrainSensor(
 
         departure_time = parse_datetime(section.get("base_departure_date_time", ""))
 
-        dep_name = entry.data[CONF_DEPARTURE_NAME]
-        arr_name = entry.data[CONF_ARRIVAL_NAME]
-
         self.departure = entry.data[CONF_FROM]
         self.arrival = entry.data[CONF_TO]
 
@@ -242,15 +259,7 @@ class SncfTrainSensor(
             self._extra_attributes(journey) if journey else {}
         )
 
-        self._attr_device_info = {
-            "identifiers": {
-                (DOMAIN, entry.subentry_id),
-            },
-            "name": f"SNCF {dep_name} → {arr_name}",
-            "manufacturer": "Master13011",
-            "model": "API",
-            "entry_type": DeviceEntryType.SERVICE,
-        }
+        self._attr_device_info = trip_device_info(entry)
 
         self._attr_native_value = departure_time
 
@@ -306,11 +315,15 @@ class SncfTrainSensor(
             )
         )
 
-        delay = (
+        arrival_delay = (
             int((arr_dt - base_arr_dt).total_seconds() / 60)
             if arr_dt and base_arr_dt
             else 0
         )
+        departure_delay = journey_departure_delay(journey)
+        # Retard retenu : le plus grand des deux (un train peut partir en
+        # retard et le rattraper, ou l'inverse).
+        delay = max(arrival_delay, departure_delay)
 
         display_informations = section.get(
             "display_informations",
@@ -346,6 +359,8 @@ class SncfTrainSensor(
                 )
             ),
             "delay_minutes": delay,
+            "departure_delay_minutes": departure_delay,
+            "arrival_delay_minutes": arrival_delay,
             "duration_minutes": get_duration(journey),
             "has_delay": delay > 0,
             "departure_stop_id": self.departure,
@@ -392,15 +407,9 @@ class SncfAllTrainsLineSensor(
 
         self._attr_unique_id = f"{train_id}_all_trains_line"
 
-        self._attr_device_info = {
-            "identifiers": {
-                (DOMAIN, train_id),
-            },
-            "name": "SNCF",
-            "manufacturer": "Master13011",
-            "model": "API",
-            "entry_type": DeviceEntryType.SERVICE,
-        }
+        self._attr_device_info = trip_device_info(
+            coordinator.entry.subentries[train_id]
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:

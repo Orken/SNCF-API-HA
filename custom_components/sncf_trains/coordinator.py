@@ -33,6 +33,7 @@ from .disruptions import (
     merge_with_schedule,
     planned_departure,
 )
+from .helpers import short_station_name
 from .tracking import EVENT_STATUS_CHANGED, detect_changes
 
 _LOGGER = logging.getLogger(__name__)
@@ -440,8 +441,10 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             data = getattr(subentry, "data", {}) or {}
             trip_info[subentry_id] = {
                 "trip_title": getattr(subentry, "title", ""),
-                "departure_name": data.get(CONF_DEPARTURE_NAME, ""),
-                "arrival_name": data.get(CONF_ARRIVAL_NAME, ""),
+                "departure_name": short_station_name(
+                    data.get(CONF_DEPARTURE_NAME, "")
+                ),
+                "arrival_name": short_station_name(data.get(CONF_ARRIVAL_NAME, "")),
             }
 
         now = dt_util.now()

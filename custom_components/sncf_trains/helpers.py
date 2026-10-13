@@ -1,5 +1,6 @@
 """Helpers for component."""
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -116,3 +117,31 @@ def get_duration(journey: dict[str, Any]) -> int:
         return int((arr - dep).total_seconds() / 60)
 
     return 0
+
+
+def only_stations(places: Any) -> list[dict[str, Any]]:
+    """Keep only stations (stop areas) from a Navitia places answer."""
+    if not isinstance(places, list):
+        return []
+    return [
+        place
+        for place in places
+        if isinstance(place, dict)
+        and (
+            place.get("embedded_type") == "stop_area"
+            or str(place.get("id", "")).startswith("stop_area:")
+        )
+    ]
+
+
+def short_station_name(name: str) -> str:
+    """Drop a redundant city suffix: "L'Isle-Jourdain (L'Isle-Jourdain)" -> "L'Isle-Jourdain".
+
+    A different city is kept: "Saint-Agne (Toulouse)" stays unchanged.
+    """
+    if not name:
+        return name
+    match = re.fullmatch(r"(.+?) \((.+)\)", name.strip())
+    if match and match.group(1).strip().casefold() == match.group(2).strip().casefold():
+        return match.group(1).strip()
+    return name.strip()

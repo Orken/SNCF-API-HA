@@ -106,6 +106,7 @@ Nouveaux attributs sur chaque capteur de train :
 | `departed` | `true` si le train est déjà parti (heure de départ réelle passée) |
 | `destination_served` | `false` si la SNCF a supprimé l'arrêt à la gare d'arrivée (le train circule mais ne vous y dépose pas) |
 | `cancelled` | `true` si le train est supprimé |
+| `departure_delay_minutes` / `arrival_delay_minutes` | Retard au départ / à l'arrivée ; `delay_minutes` vaut le plus grand des deux |
 | `disruption_effect` | Effet de la perturbation la plus grave (`NO_SERVICE`, `SIGNIFICANT_DELAYS`…) |
 | `disruption_message` | Explication : message de la perturbation, sinon cause indiquée sur le train, sinon message du trajet, sinon « Arrêt X supprimé » |
 
@@ -127,7 +128,7 @@ Les capteurs « Train 1…N » listent les **prochains départs** : ils se déca
 
 Le dernier statut de chaque train est mémorisé sur disque : pas de doublon après un redémarrage.
 
-Données de l'événement : `train_uid`, `train_num`, `trip_title`, `departure_name`, `arrival_name`, `planned_departure`, `departure_time`, `arrival_time`, `status`, `previous_status`, `delay_minutes`, `destination_served`, `disruption_effect`, `disruption_message`.
+Données de l'événement : `train_uid`, `train_num`, `trip_title`, `departure_name`, `arrival_name`, `planned_departure`, `departure_time`, `arrival_time`, `status`, `previous_status`, `delay_minutes`, `departure_delay_minutes`, `arrival_delay_minutes`, `destination_served`, `disruption_effect`, `disruption_message`.
 
 Exemple de notification :
 

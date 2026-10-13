@@ -18,7 +18,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SncfUpdateCoordinator
-from .disruptions import KEY_STATUS, STATUS_CANCELLED
+from .disruptions import KEY_STATUS, STATUS_CANCELLED, transport_section
 from .helpers import get_train_num, parse_datetime
 
 _LOGGER = logging.getLogger(__name__)
@@ -84,8 +84,8 @@ class SNCFCalendar(
 
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.entry.entry_id)},
-            "name": "SNCF",
-            "manufacturer": "Master13011",
+            "name": "SNCF Trains",
+            "manufacturer": "SNCF",
             "model": "API",
             "entry_type": DeviceEntryType.SERVICE,
         }
@@ -146,12 +146,7 @@ class SNCFCalendar(
         """Calculate the delay for a journey."""
         arr_dt = parse_datetime(journey.get("arrival_date_time", ""))
 
-        sections = journey.get("sections", [])
-
-        if not isinstance(sections, list) or not sections:
-            section = {}
-        else:
-            section = sections[0]
+        section = transport_section(journey)
 
         base_arr_dt = parse_datetime(section.get("base_arrival_date_time", ""))
 
@@ -235,11 +230,13 @@ class SNCFCalendar(
                     )
                     continue
 
-                section = sections[0]
+                # Section du train (et non la première section, qui peut
+                # être un trajet à pied).
+                section = transport_section(journey)
 
-                if not isinstance(section, dict):
+                if not section:
                     _LOGGER.debug(
-                        "Journey[%d] ignoré : première section invalide",
+                        "Journey[%d] ignoré : aucune section de train",
                         journey_index,
                     )
                     continue

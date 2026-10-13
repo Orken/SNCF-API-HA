@@ -6,6 +6,7 @@ from aiohttp import ClientError, ClientSession, ClientTimeout
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from .disruptions import attach_disruptions
+from .helpers import only_stations
 
 API_BASE = "https://api.sncf.com"
 _LOGGER = logging.getLogger(__name__)
@@ -117,7 +118,10 @@ class SncfApiClient:
         url = f"{API_BASE}/v1/coverage/sncf/places"
         params_raw: dict[str, object] = {
             "q": query,
-            "type[]": "stop_point",
+            # Seules les gares (zones d'arrêt) sont pertinentes : les villes,
+            # adresses ou lieux renvoyés sinon donnent des trajets que l'API
+            # ne sait pas calculer.
+            "type[]": "stop_area",
         }
         params: Mapping[str, str] = {k: str(v) for k, v in params_raw.items()}
         headers = {"Authorization": f"Basic {self._token}"}
@@ -130,7 +134,7 @@ class SncfApiClient:
             ) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
-                return data.get("places", [])
+                return only_stations(data.get("places", []))
         except (TimeoutError, ClientError) as err:
             _LOGGER.error("Network error searching stations from SNCF API: %s", err)
             return None

@@ -44,7 +44,7 @@ _EFFECT_SEVERITY = [
 ]
 
 
-def _transport_section(journey: dict[str, Any]) -> dict[str, Any]:
+def transport_section(journey: dict[str, Any]) -> dict[str, Any]:
     """Return the public transport section of a journey (or {})."""
     sections = journey.get("sections", [])
     if not isinstance(sections, list):
@@ -60,7 +60,7 @@ def _transport_section(journey: dict[str, Any]) -> dict[str, Any]:
 
 def planned_departure(journey: dict[str, Any]) -> datetime | None:
     """Return the planned (base) departure datetime of a journey."""
-    section = _transport_section(journey)
+    section = transport_section(journey)
     for value in (
         section.get("base_departure_date_time"),
         section.get("departure_date_time"),
@@ -369,7 +369,7 @@ def journey_cause(journey: dict[str, Any]) -> str | None:
     if disruption.get("message"):
         return str(disruption["message"])
 
-    section = _transport_section(journey)
+    section = transport_section(journey)
     if section.get("cause"):
         return str(section["cause"]).strip()
 
