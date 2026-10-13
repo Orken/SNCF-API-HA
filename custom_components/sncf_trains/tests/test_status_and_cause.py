@@ -16,6 +16,7 @@ from custom_components.sncf_trains.disruptions import (
     journey_cause,
     journey_status,
     mark_destination_deleted,
+    merge_with_schedule,
 )
 from custom_components.sncf_trains.tracking import detect_changes
 
@@ -103,7 +104,7 @@ def _disruption_deleting(stop_id: str, train="870302") -> dict:
     }
 
 
-def test_deleted_destination_stop_cancels_the_train_for_the_user():
+def test_deleted_destination_stop_is_information_not_cancellation():
     journey = _journey()
     attach_disruptions(
         [journey], [_disruption_deleting("stop_point:SNCF:87611301:Train")]
@@ -112,8 +113,44 @@ def test_deleted_destination_stop_cancels_the_train_for_the_user():
     mark_destination_deleted([journey], "stop_area:SNCF:87611301")
 
     assert journey[KEY_DESTINATION_DELETED] is True
-    assert journey[KEY_STATUS] == STATUS_CANCELLED
+    assert KEY_STATUS not in journey
+    assert journey_status(journey, 0) == STATUS_ON_TIME
     assert journey_cause(journey) == "Arrêt Saint-Agne supprimé"
+
+
+def test_merge_keeps_planned_train_whose_destination_stop_is_deleted():
+    """Missing from realtime only because it no longer reaches the destination."""
+    realtime = [_journey("870302", "20261014T074700")]
+    planned = _journey("870404", "20261014T081600")
+    attach_disruptions(
+        [planned],
+        [_disruption_deleting("stop_point:SNCF:87611301:Train", train="870404")],
+    )
+
+    merged = merge_with_schedule(realtime, [planned], "stop_area:SNCF:87611301")
+
+    assert len(merged) == 2
+    assert merged[1][KEY_DESTINATION_DELETED] is True
+    assert KEY_STATUS not in merged[1]
+
+
+def test_destination_served_change_emits_event():
+    journey = _journey()
+    _, state = detect_changes({}, {"t": [journey]}, {}, _at(2026, 10, 13, 20, 0))
+
+    skipped = dict(journey)
+    skipped[KEY_DESTINATION_DELETED] = True
+    events, state = detect_changes(
+        state, {"t": [skipped]}, {}, _at(2026, 10, 13, 20, 5)
+    )
+
+    assert len(events) == 1
+    assert events[0]["status"] == STATUS_ON_TIME
+    assert events[0]["destination_served"] is False
+
+    # Unchanged afterwards: silent.
+    events, _ = detect_changes(state, {"t": [skipped]}, {}, _at(2026, 10, 13, 20, 10))
+    assert events == []
 
 
 def test_other_deleted_stop_is_ignored():

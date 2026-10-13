@@ -92,7 +92,7 @@ Cette version interroge donc aussi les **horaires théoriques** (`data_freshness
 
 - un train prévu mais absent du temps réel (avant le dernier train temps réel renvoyé) est marqué **supprimé** ;
 - une perturbation `NO_SERVICE` sur le train le marque aussi comme supprimé.
-- un train qui **ne s'arrête plus à la gare d'arrivée** (arrêt supprimé par la SNCF) est aussi considéré comme supprimé.
+- un train qui **ne s'arrête plus à la gare d'arrivée** (arrêt supprimé par la SNCF) n'est **pas** marqué supprimé (il peut s'arrêter avant) : l'information est remontée via `destination_served: false` et l'événement.
 
 ![Train supprimé détecté sur un tableau de bord (tuile « ❌ Supprimé · Indisponibilité d'un matériel »)](./assets/trains_supprimes.png)
 
@@ -104,7 +104,7 @@ Nouveaux attributs sur chaque capteur de train :
 |---|---|
 | `status` | `on_time`, `delayed`, `departed` (déjà parti) ou `cancelled` — au tableau de bord de décider quoi afficher |
 | `departed` | `true` si le train est déjà parti (heure de départ réelle passée) |
-| `destination_served` | `false` si la SNCF a supprimé l'arrêt à la gare d'arrivée : le train est alors considéré comme supprimé |
+| `destination_served` | `false` si la SNCF a supprimé l'arrêt à la gare d'arrivée (le train circule mais ne vous y dépose pas) |
 | `cancelled` | `true` si le train est supprimé |
 | `disruption_effect` | Effet de la perturbation la plus grave (`NO_SERVICE`, `SIGNIFICANT_DELAYS`…) |
 | `disruption_message` | Explication : message de la perturbation, sinon cause indiquée sur le train, sinon message du trajet, sinon « Arrêt X supprimé » |
@@ -122,11 +122,12 @@ Les capteurs « Train 1…N » listent les **prochains départs** : ils se déca
 - train vu pour la première fois en retard ou supprimé ;
 - passage à l'heure / en retard / supprimé (dans un sens ou dans l'autre) ;
 - évolution du retard d'un train déjà en retard.
+- la gare d'arrivée n'est plus desservie (ou l'est de nouveau) : champ `destination_served`.
 - (le départ d'un train, statut `departed`, ne génère pas d'événement)
 
 Le dernier statut de chaque train est mémorisé sur disque : pas de doublon après un redémarrage.
 
-Données de l'événement : `train_uid`, `train_num`, `trip_title`, `departure_name`, `arrival_name`, `planned_departure`, `departure_time`, `arrival_time`, `status`, `previous_status`, `delay_minutes`, `disruption_effect`, `disruption_message`.
+Données de l'événement : `train_uid`, `train_num`, `trip_title`, `departure_name`, `arrival_name`, `planned_departure`, `departure_time`, `arrival_time`, `status`, `previous_status`, `delay_minutes`, `destination_served`, `disruption_effect`, `disruption_message`.
 
 Exemple de notification :
 

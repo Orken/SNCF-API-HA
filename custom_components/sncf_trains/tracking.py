@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .disruptions import (
+    KEY_DESTINATION_DELETED,
     STATUS_ON_TIME,
     journey_cause,
     journey_key,
@@ -88,11 +89,16 @@ def detect_changes(
 
             delay = journey_delay(journey)
             status = journey_status(journey, delay)
+            served = not journey.get(KEY_DESTINATION_DELETED, False)
             before = previous.get(uid)
 
             changed = (
-                (before is None and status != STATUS_ON_TIME)
+                (before is None and (status != STATUS_ON_TIME or not served))
                 or (before is not None and before.get("status") != status)
+                or (
+                    before is not None
+                    and before.get("destination_served", True) != served
+                )
                 or (
                     before is not None
                     and status != STATUS_ON_TIME
@@ -108,6 +114,7 @@ def detect_changes(
                 "planned_departure": dep.isoformat(),
                 "status": status,
                 "delay_minutes": delay,
+                "destination_served": served,
             }
             state[uid] = record
 

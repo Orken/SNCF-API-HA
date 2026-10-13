@@ -238,6 +238,7 @@ def _is_cancelled_by_disruption(journey: dict[str, Any]) -> bool:
 def merge_with_schedule(
     realtime: list[dict[str, Any]],
     base_schedule: list[dict[str, Any]] | None,
+    arrival_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Merge realtime journeys with the planned timetable.
 
@@ -247,6 +248,10 @@ def merge_with_schedule(
     * a disruption explicitly says the train has no service, or
     * it was planned before the last realtime train (so it is not simply
       beyond the number of results requested).
+
+    Exception: a planned train missing only because a disruption removed
+    its stop at ``arrival_id`` is added back flagged "destination not
+    served", not cancelled.
 
     The result is sorted by planned departure.
     """
@@ -275,14 +280,20 @@ def merge_with_schedule(
             continue
         dep = planned_departure(journey)
         confirmed = _is_cancelled_by_disruption(journey)
+        stop_deleted = destination_deleted(journey, arrival_id)
         within_range = (
             latest_realtime is not None and dep is not None and dep <= latest_realtime
         )
-        if not (confirmed or within_range):
+        if not (confirmed or stop_deleted or within_range):
             continue
-        cancelled = dict(journey)
-        cancelled[KEY_STATUS] = STATUS_CANCELLED
-        merged.append(cancelled)
+        added = dict(journey)
+        if stop_deleted and not confirmed:
+            # The realtime planner drops it because it no longer reaches
+            # the destination; the train itself still runs.
+            added[KEY_DESTINATION_DELETED] = True
+        else:
+            added[KEY_STATUS] = STATUS_CANCELLED
+        merged.append(added)
         realtime_keys.add(key)
 
     def sort_key(journey: dict[str, Any]) -> float:
@@ -299,25 +310,27 @@ def _stop_code(stop_id: str) -> str:
     return codes[0] if codes else (stop_id or "")
 
 
+def destination_deleted(journey: dict[str, Any], arrival_id: str | None) -> bool:
+    """True if a disruption removed the stop at the arrival station."""
+    code = _stop_code(arrival_id or "")
+    if not code:
+        return False
+    return any(
+        code in stop
+        for dis in journey.get(KEY_DISRUPTIONS) or []
+        for stop in dis.get("deleted_stops") or []
+    )
+
+
 def mark_destination_deleted(journeys: list[dict[str, Any]], arrival_id: str) -> None:
     """Flag trains that no longer stop at the arrival station (in place).
 
-    For the user such a train is cancelled, even if it still runs.
+    This is information only: the train still runs (it may stop before the
+    destination), so it is not marked as cancelled.
     """
-    code = _stop_code(arrival_id)
-    if not code:
-        return
     for journey in journeys:
-        if not isinstance(journey, dict):
-            continue
-        deleted = any(
-            code in stop
-            for dis in journey.get(KEY_DISRUPTIONS) or []
-            for stop in dis.get("deleted_stops") or []
-        )
-        if deleted:
+        if isinstance(journey, dict) and destination_deleted(journey, arrival_id):
             journey[KEY_DESTINATION_DELETED] = True
-            journey[KEY_STATUS] = STATUS_CANCELLED
 
 
 def has_departed(journey: dict[str, Any], now: datetime) -> bool:

@@ -398,10 +398,11 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             merged = merge_with_schedule(
                 filtered_journeys,
                 base_journeys,
+                arrival,
             )
 
-            # Train qui ne dessert plus la gare d'arrivée : supprimé pour
-            # l'utilisateur.
+            # Train qui ne dessert plus la gare d'arrivée : information
+            # seulement (il peut s'arrêter avant), pas une suppression.
             mark_destination_deleted(merged, arrival)
 
             # ---------------------------------------------------------
