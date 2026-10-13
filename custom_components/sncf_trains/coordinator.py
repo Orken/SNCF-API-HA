@@ -28,7 +28,11 @@ from .const import (
     DEFAULT_OUTSIDE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
 )
-from .disruptions import merge_with_schedule, planned_departure
+from .disruptions import (
+    mark_destination_deleted,
+    merge_with_schedule,
+    planned_departure,
+)
 from .tracking import EVENT_STATUS_CHANGED, detect_changes
 
 _LOGGER = logging.getLogger(__name__)
@@ -395,6 +399,10 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                 filtered_journeys,
                 base_journeys,
             )
+
+            # Train qui ne dessert plus la gare d'arrivée : supprimé pour
+            # l'utilisateur.
+            mark_destination_deleted(merged, arrival)
 
             # ---------------------------------------------------------
             # Plage horaire : on ne garde que les trains qui partent

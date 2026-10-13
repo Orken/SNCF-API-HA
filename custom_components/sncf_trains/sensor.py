@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from . import SncfDataConfigEntry
 from .const import (
@@ -20,7 +21,14 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SncfUpdateCoordinator
-from .disruptions import STATUS_CANCELLED, journey_status, main_disruption
+from .disruptions import (
+    KEY_DESTINATION_DELETED,
+    STATUS_CANCELLED,
+    STATUS_DEPARTED,
+    journey_cause,
+    journey_status,
+    main_disruption,
+)
 from .helpers import format_time, get_duration, get_train_num, parse_datetime
 from .tracking import journey_uid
 
@@ -116,14 +124,20 @@ def get_transport_section(journey: dict[str, Any]) -> dict[str, Any]:
 
 
 def disruption_attributes(journey: dict[str, Any], delay: int) -> dict[str, Any]:
-    """Status and disruption attributes for a journey."""
-    status = journey_status(journey, delay)
+    """Status and disruption attributes for a journey.
+
+    ``status`` is one of on_time / delayed / departed / cancelled; the
+    dashboard decides what to show (e.g. hide departed trains).
+    """
+    status = journey_status(journey, delay, dt_util.now())
     disruption = main_disruption(journey) or {}
     return {
         "status": status,
         "cancelled": status == STATUS_CANCELLED,
+        "departed": status == STATUS_DEPARTED,
+        "destination_served": not journey.get(KEY_DESTINATION_DELETED, False),
         "disruption_effect": disruption.get("effect"),
-        "disruption_message": disruption.get("message") or None,
+        "disruption_message": journey_cause(journey),
     }
 
 
@@ -451,7 +465,7 @@ class SncfAllTrainsLineSensor(
 
             delays.append(str(delay))
 
-            status = journey_status(journey, delay)
+            status = journey_status(journey, delay, dt_util.now())
             statuses.append(status)
 
             if status == STATUS_CANCELLED:

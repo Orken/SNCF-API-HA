@@ -189,6 +189,7 @@ def test_attach_disruptions_by_link_and_by_train_number():
             "effect": "SIGNIFICANT_DELAYS",
             "message": "Retard de 20 min",
             "cause": "Panne de signalisation",
+            "deleted_stops": [],
         }
     ]
     assert by_number[KEY_DISRUPTIONS][0]["effect"] == "NO_SERVICE"

@@ -16,6 +16,7 @@ from typing import Any
 
 from .disruptions import (
     STATUS_ON_TIME,
+    journey_cause,
     journey_key,
     journey_status,
     main_disruption,
@@ -121,7 +122,7 @@ def detect_changes(
                         "departure_time": dep_rt.isoformat() if dep_rt else None,
                         "arrival_time": arr_rt.isoformat() if arr_rt else None,
                         "disruption_effect": disruption.get("effect"),
-                        "disruption_message": disruption.get("message") or None,
+                        "disruption_message": journey_cause(journey),
                     }
                 )
 

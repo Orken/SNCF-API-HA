@@ -92,6 +92,7 @@ Cette version interroge donc aussi les **horaires théoriques** (`data_freshness
 
 - un train prévu mais absent du temps réel (avant le dernier train temps réel renvoyé) est marqué **supprimé** ;
 - une perturbation `NO_SERVICE` sur le train le marque aussi comme supprimé.
+- un train qui **ne s'arrête plus à la gare d'arrivée** (arrêt supprimé par la SNCF) est aussi considéré comme supprimé.
 
 ![Train supprimé détecté sur un tableau de bord (tuile « ❌ Supprimé · Indisponibilité d'un matériel »)](./assets/trains_supprimes.png)
 
@@ -101,10 +102,12 @@ Nouveaux attributs sur chaque capteur de train :
 
 | Attribut | Description |
 |---|---|
-| `status` | `on_time`, `delayed` ou `cancelled` |
+| `status` | `on_time`, `delayed`, `departed` (déjà parti) ou `cancelled` — au tableau de bord de décider quoi afficher |
+| `departed` | `true` si le train est déjà parti (heure de départ réelle passée) |
+| `destination_served` | `false` si la SNCF a supprimé l'arrêt à la gare d'arrivée : le train est alors considéré comme supprimé |
 | `cancelled` | `true` si le train est supprimé |
 | `disruption_effect` | Effet de la perturbation la plus grave (`NO_SERVICE`, `SIGNIFICANT_DELAYS`…) |
-| `disruption_message` | Message de la SNCF (ou cause) quand il existe |
+| `disruption_message` | Explication : message de la perturbation, sinon cause indiquée sur le train, sinon message du trajet, sinon « Arrêt X supprimé » |
 
 Le capteur « Tous les trains (ligne) » expose aussi `status` et `cancelled_count`, et le calendrier préfixe les trains supprimés par « ❌ Supprimé ».
 
@@ -119,6 +122,7 @@ Les capteurs « Train 1…N » listent les **prochains départs** : ils se déca
 - train vu pour la première fois en retard ou supprimé ;
 - passage à l'heure / en retard / supprimé (dans un sens ou dans l'autre) ;
 - évolution du retard d'un train déjà en retard.
+- (le départ d'un train, statut `departed`, ne génère pas d'événement)
 
 Le dernier statut de chaque train est mémorisé sur disque : pas de doublon après un redémarrage.
 

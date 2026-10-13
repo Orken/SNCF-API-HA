@@ -12,6 +12,7 @@ Assistant.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -20,9 +21,11 @@ from .helpers import get_train_num, parse_datetime
 # Keys added to journey dicts by this integration (not part of the API).
 KEY_STATUS = "sncf_status"
 KEY_DISRUPTIONS = "sncf_disruptions"
+KEY_DESTINATION_DELETED = "sncf_destination_deleted"
 
 STATUS_ON_TIME = "on_time"
 STATUS_DELAYED = "delayed"
+STATUS_DEPARTED = "departed"
 STATUS_CANCELLED = "cancelled"
 
 EFFECT_NO_SERVICE = "NO_SERVICE"
@@ -105,11 +108,30 @@ def _simplify_disruption(disruption: dict[str, Any]) -> dict[str, Any]:
             if cause:
                 break
 
+    # Stops removed from the train's route (partial cancellation).
+    deleted_stops: list[str] = []
+    for obj in disruption.get("impacted_objects") or []:
+        for stop in (obj or {}).get("impacted_stops") or []:
+            if not isinstance(stop, dict):
+                continue
+            if "deleted" not in (
+                stop.get("stop_time_effect"),
+                stop.get("departure_status"),
+                stop.get("arrival_status"),
+            ):
+                continue
+            point = stop.get("stop_point") or {}
+            area = point.get("stop_area") or {}
+            for value in (point.get("id"), area.get("id"), point.get("name")):
+                if value:
+                    deleted_stops.append(str(value))
+
     return {
         "id": disruption.get("id") or disruption.get("disruption_id") or "",
         "effect": effect or "UNKNOWN_EFFECT",
         "message": message or str(cause),
         "cause": str(cause),
+        "deleted_stops": deleted_stops,
     }
 
 
@@ -271,8 +293,79 @@ def merge_with_schedule(
     return merged
 
 
-def journey_status(journey: dict[str, Any], delay_minutes: int) -> str:
-    """Status shown to the user: on_time / delayed / cancelled."""
+def _stop_code(stop_id: str) -> str:
+    """UIC code of a stop ("stop_area:SNCF:87611301" -> "87611301")."""
+    codes = re.findall(r"\d{7,}", stop_id or "")
+    return codes[0] if codes else (stop_id or "")
+
+
+def mark_destination_deleted(journeys: list[dict[str, Any]], arrival_id: str) -> None:
+    """Flag trains that no longer stop at the arrival station (in place).
+
+    For the user such a train is cancelled, even if it still runs.
+    """
+    code = _stop_code(arrival_id)
+    if not code:
+        return
+    for journey in journeys:
+        if not isinstance(journey, dict):
+            continue
+        deleted = any(
+            code in stop
+            for dis in journey.get(KEY_DISRUPTIONS) or []
+            for stop in dis.get("deleted_stops") or []
+        )
+        if deleted:
+            journey[KEY_DESTINATION_DELETED] = True
+            journey[KEY_STATUS] = STATUS_CANCELLED
+
+
+def has_departed(journey: dict[str, Any], now: datetime) -> bool:
+    """True once the (realtime) departure time has passed."""
+    dep = parse_datetime(journey.get("departure_date_time", "")) or planned_departure(
+        journey
+    )
+    return dep is not None and dep <= now
+
+
+def journey_status(
+    journey: dict[str, Any],
+    delay_minutes: int,
+    now: datetime | None = None,
+) -> str:
+    """Status shown to the user.
+
+    ``cancelled`` > ``departed`` > ``delayed`` > ``on_time``. Without
+    ``now`` the departed state is not computed (service status only, used
+    for change tracking so that departures do not produce events).
+    """
     if journey.get(KEY_STATUS) == STATUS_CANCELLED:
         return STATUS_CANCELLED
+    if now is not None and has_departed(journey, now):
+        return STATUS_DEPARTED
     return STATUS_DELAYED if delay_minutes > 0 else STATUS_ON_TIME
+
+
+def journey_cause(journey: dict[str, Any]) -> str | None:
+    """Best available explanation for a disruption, if any.
+
+    Order: most severe disruption message, cause on the train section,
+    journey messages, then a generic text for a deleted destination stop.
+    """
+    disruption = main_disruption(journey) or {}
+    if disruption.get("message"):
+        return str(disruption["message"])
+
+    section = _transport_section(journey)
+    if section.get("cause"):
+        return str(section["cause"]).strip()
+
+    for msg in journey.get("messages") or []:
+        if isinstance(msg, dict) and msg.get("text"):
+            return str(msg["text"]).strip()
+
+    if journey.get(KEY_DESTINATION_DELETED):
+        name = (section.get("to") or {}).get("name") or "destination"
+        return f"Arrêt {name} supprimé"
+
+    return None
