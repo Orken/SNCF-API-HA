@@ -9,12 +9,13 @@ from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import SncfApiClient
+from .api import SncfApiClient, SncfInvalidJourneyError, SncfQuotaError
 from .const import (
     CONF_API_KEY,
     CONF_ARRIVAL_NAME,
@@ -27,6 +28,7 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     DEFAULT_OUTSIDE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
+    DOMAIN,
 )
 from .disruptions import (
     mark_destination_deleted,
@@ -39,6 +41,10 @@ from .tracking import EVENT_STATUS_CHANGED, detect_changes
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
+
+# Nombre de mises à jour consécutives en échec avant de signaler une
+# réparation « API injoignable » (évite les alertes sur un incident bref).
+FAILURES_BEFORE_ISSUE = 3
 
 
 class SncfUpdateCoordinator(DataUpdateCoordinator):
@@ -53,6 +59,9 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         # pour ne pas ré-annoncer les mêmes changements après un redémarrage.
         self.train_states: dict[str, dict[str, Any]] = {}
         self._store: Store | None = None
+
+        # Échecs réseau/quota consécutifs par trajet.
+        self._failures: dict[str, int] = {}
 
         self.update_interval_minutes = entry.options.get(
             CONF_UPDATE_INTERVAL,
@@ -304,6 +313,8 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             )
 
             journeys = None
+            last_error = ""
+            invalid: SncfInvalidJourneyError | None = None
 
             # ---------------------------------------------------------
             # Appel API avec retry
@@ -320,7 +331,15 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                     if journeys is not None:
                         break
 
+                except SncfInvalidJourneyError as err:
+                    # Inutile de réessayer : le trajet lui-même est refusé.
+                    invalid = err
+                    break
+
                 except (TimeoutError, ClientError, RuntimeError) as err:
+                    last_error = (
+                        "quota" if isinstance(err, SncfQuotaError) else str(err)
+                    )
                     _LOGGER.warning(
                         "Erreur réseau lors de la récupération des trajets "
                         "(tentative %d/%d) : %s",
@@ -335,12 +354,53 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             # ---------------------------------------------------------
             # Vérification de la réponse API
             # ---------------------------------------------------------
-            if journeys is None or not isinstance(journeys, list):
-                _LOGGER.error(
-                    "Aucune donnée reçue de l'API SNCF pour le trajet '%s'",
+            if invalid is not None:
+                _LOGGER.warning(
+                    "Trajet '%s' refusé par l'API SNCF (%s) : %s",
                     entry.title,
+                    invalid.error_id,
+                    invalid.message,
                 )
+                self._raise_issue(
+                    f"invalid_journey_{subentry_id}",
+                    "invalid_journey",
+                    ir.IssueSeverity.ERROR,
+                    {
+                        "title": entry.title,
+                        "reason": invalid.message or invalid.error_id,
+                    },
+                )
+                trains[subentry_id] = []
                 continue
+
+            self._clear_issue(f"invalid_journey_{subentry_id}")
+
+            if journeys is None or not isinstance(journeys, list):
+                failures = self._failures.get(subentry_id, 0) + 1
+                self._failures[subentry_id] = failures
+                _LOGGER.warning(
+                    "Aucune donnée reçue de l'API SNCF pour le trajet '%s' "
+                    "(%d échec(s) consécutif(s))",
+                    entry.title,
+                    failures,
+                )
+                if failures >= FAILURES_BEFORE_ISSUE:
+                    self._raise_issue(
+                        "api_unavailable",
+                        "quota_exceeded"
+                        if last_error == "quota"
+                        else "api_unavailable",
+                        ir.IssueSeverity.WARNING,
+                        {"title": entry.title},
+                    )
+                # On garde les dernières données connues plutôt que de vider
+                # les capteurs pendant un incident passager.
+                previous = (self.data or {}).get(subentry_id)
+                if previous is not None:
+                    trains[subentry_id] = previous
+                continue
+
+            self._failures[subentry_id] = 0
 
             _LOGGER.debug(
                 "Trajet '%s' : %d journey(s) reçu(s) depuis l'API",
@@ -429,9 +489,34 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                     self.update_interval.total_seconds() / 60,
                 )
 
+        if not any(self._failures.values()):
+            self._clear_issue("api_unavailable")
+
         self._track_changes(trains)
 
         return trains
+
+    def _raise_issue(
+        self,
+        issue_id: str,
+        translation_key: str,
+        severity: ir.IssueSeverity,
+        placeholders: dict[str, str],
+    ) -> None:
+        """Signale un problème dans Paramètres → Réparations."""
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=severity,
+            translation_key=translation_key,
+            translation_placeholders=placeholders,
+        )
+
+    def _clear_issue(self, issue_id: str) -> None:
+        """Retire un problème résolu de Paramètres → Réparations."""
+        ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     def _track_changes(self, trains: dict[str, list[dict[str, Any]]]) -> None:
         """Émet un événement par train dont le statut a changé."""
@@ -441,9 +526,7 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             data = getattr(subentry, "data", {}) or {}
             trip_info[subentry_id] = {
                 "trip_title": getattr(subentry, "title", ""),
-                "departure_name": short_station_name(
-                    data.get(CONF_DEPARTURE_NAME, "")
-                ),
+                "departure_name": short_station_name(data.get(CONF_DEPARTURE_NAME, "")),
                 "arrival_name": short_station_name(data.get(CONF_ARRIVAL_NAME, "")),
             }
 

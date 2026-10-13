@@ -81,5 +81,19 @@
         "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
       }
     }
+  },
+  "issues": {
+    "invalid_journey": {
+      "title": "Invalid SNCF journey: {title}",
+      "description": "The SNCF API rejects this journey: \"{reason}\".\n\nAs configured it can never return a train (unknown station, date outside published timetables…). Delete it and create it again, choosing a **station** for departure and arrival, in Settings → Devices & services → SNCF Trains."
+    },
+    "api_unavailable": {
+      "title": "SNCF API unreachable",
+      "description": "Several consecutive updates failed (last journey: {title}). The last known data is still displayed.\n\nCheck Home Assistant's Internet connection and the service status at https://www.digital.sncf.com/startup/api. This message clears itself once the API responds again."
+    },
+    "quota_exceeded": {
+      "title": "SNCF API quota exceeded",
+      "description": "The SNCF API rejects requests: your key's quota (5,000 requests per day) is used up (last journey: {title}). The last known data is still displayed.\n\nReduce the number of journeys or increase the update interval in the integration options. This message clears itself when the quota resets."
+    }
   }
 }

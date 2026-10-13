@@ -86,5 +86,19 @@
         "reconfigure_successful": "Trajet reconfiguré avec succès"
       }
     }
+  },
+  "issues": {
+    "invalid_journey": {
+      "title": "Trajet SNCF invalide : {title}",
+      "description": "L'API SNCF refuse ce trajet : « {reason} ».\n\nCe trajet ne pourra jamais renvoyer de train tel qu'il est configuré (gare inconnue, date hors des horaires publiés…). Supprimez-le puis recréez-le en choisissant bien une **gare** de départ et d'arrivée dans Paramètres → Appareils et services → SNCF Trains."
+    },
+    "api_unavailable": {
+      "title": "API SNCF injoignable",
+      "description": "Plusieurs mises à jour consécutives ont échoué (dernier trajet concerné : {title}). Les dernières données connues restent affichées.\n\nVérifiez la connexion Internet de Home Assistant et l'état du service sur https://www.digital.sncf.com/startup/api. Ce message disparaît tout seul dès que l'API répond de nouveau."
+    },
+    "quota_exceeded": {
+      "title": "Quota de l'API SNCF dépassé",
+      "description": "L'API SNCF refuse les requêtes : le quota de votre clé (5 000 requêtes par jour) est atteint (dernier trajet concerné : {title}). Les dernières données connues restent affichées.\n\nRéduisez le nombre de trajets ou augmentez l'intervalle de mise à jour dans les options de l'intégration. Ce message disparaît tout seul quand le quota est réinitialisé."
+    }
   }
 }

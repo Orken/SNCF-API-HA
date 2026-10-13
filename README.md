@@ -152,6 +152,20 @@ Le nombre de capteurs « Train N » correspond toujours au nombre de trains dema
 
 ---
 
+## 🛠️ Erreurs et réparations
+
+Les problèmes persistants apparaissent dans **Paramètres → Réparations** (et disparaissent seuls une fois résolus) :
+
+| Réparation | Quand | À faire |
+|---|---|---|
+| **Trajet SNCF invalide** | L'API refuse le trajet lui-même (gare inconnue, date hors horaires…) | Recréer le trajet en choisissant bien des gares |
+| **API SNCF injoignable** | 3 mises à jour consécutives en échec | Vérifier la connexion ; les dernières données restent affichées |
+| **Quota de l'API SNCF dépassé** | Clé limitée (5 000 requêtes/jour) épuisée | Moins de trajets ou intervalle plus long |
+
+« Aucun train trouvé » n'est pas une erreur : la liste est simplement vide.
+
+---
+
 ## 📊 Capteurs créés
 
 - `sensor.sncf_<gare_dep>_<gare_arr>` — capteur principal du trajet

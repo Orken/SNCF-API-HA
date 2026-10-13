@@ -1,6 +1,7 @@
 import base64
 import logging
 from collections.abc import Mapping
+from typing import Any
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -10,6 +11,32 @@ from .helpers import only_stations
 
 API_BASE = "https://api.sncf.com"
 _LOGGER = logging.getLogger(__name__)
+
+# Navitia error ids that mean "this journey request can never succeed"
+# (configuration problem), as opposed to "no train right now".
+INVALID_JOURNEY_ERRORS = {
+    "unknown_object",
+    "bad_filter",
+    "bad_format",
+    "unable_to_parse",
+    "date_out_of_bounds",
+    "no_origin",
+    "no_destination",
+    "no_origin_nor_destination",
+}
+
+
+class SncfQuotaError(RuntimeError):
+    """Daily quota exceeded (HTTP 429)."""
+
+
+class SncfInvalidJourneyError(Exception):
+    """The API rejects the journey itself (unknown station, out of range...)."""
+
+    def __init__(self, error_id: str, message: str) -> None:
+        super().__init__(f"{error_id}: {message}")
+        self.error_id = error_id
+        self.message = message
 
 
 def encode_token(api_key: str) -> str:
@@ -103,7 +130,15 @@ class SncfApiClient:
                 if resp.status == 401:
                     raise ConfigEntryAuthFailed("Unauthorized: check your API key.")
                 if resp.status == 429:
-                    raise RuntimeError("Quota exceeded: 429 Too Many Requests.")
+                    raise SncfQuotaError("Quota exceeded: 429 Too Many Requests.")
+                if resp.status in (400, 404):
+                    # Navitia explique l'échec dans le corps de la réponse.
+                    error = await _navitia_error(resp)
+                    if error[0] == "no_solution":
+                        # Aucun train : réponse normale, pas une erreur.
+                        return []
+                    if error[0] in INVALID_JOURNEY_ERRORS or resp.status == 400:
+                        raise SncfInvalidJourneyError(*error)
                 resp.raise_for_status()
                 data = await resp.json()
                 journeys = data.get("journeys", [])
@@ -138,3 +173,15 @@ class SncfApiClient:
         except (TimeoutError, ClientError) as err:
             _LOGGER.error("Network error searching stations from SNCF API: %s", err)
             return None
+
+
+async def _navitia_error(resp: Any) -> tuple[str, str]:
+    """(error id, message) from a Navitia error body, best effort."""
+    try:
+        data = await resp.json(content_type=None)
+    except (ValueError, ClientError):
+        return "", ""
+    error = data.get("error") if isinstance(data, dict) else None
+    if not isinstance(error, dict):
+        return "", ""
+    return str(error.get("id") or ""), str(error.get("message") or "")
