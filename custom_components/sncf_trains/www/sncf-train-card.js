@@ -319,14 +319,29 @@ class SncfTrainCard extends HTMLElement {
    * Récupère les entités de train associées aux device_id configurés en utilisant l'API WebSocket de Home Assistant pour obtenir des données fraîches, filtre les trains qui ne sont pas encore passés, et trie les résultats par heure de départ pour n'afficher que les trains à venir, ce qui garantit que les informations affichées sont toujours à jour et pertinentes pour l'utilisateur
    * @returns {Promise<Array>} Un tableau d'entités de train avec des données fraîches, fusionnées de tous les devices et triées par date d'arrivée
    */
+  /**
+   * Liste des entités (entity_id, device_id). Le frontend la tient déjà à jour
+   * dans hass.entities : on l'utilise directement. Sinon (très vieux Home
+   * Assistant), on interroge le registre au plus une fois toutes les 5 minutes
+   * au lieu de le faire à chaque changement d'état de la maison.
+   */
+  async getEntityRegistry() {
+    if (this._hass.entities && Object.keys(this._hass.entities).length) {
+      return Object.values(this._hass.entities);
+    }
+    const now = Date.now();
+    if (!this._registryCache || now - this._registryCacheTime > 300000) {
+      this._registryCache = await this._hass.callWS({ type: 'config/entity_registry/list' });
+      this._registryCacheTime = now;
+    }
+    return this._registryCache;
+  }
+
   async getTrainEntities() {
-    if (!this._hass || !this.config.device_id) return [];
+    if (!this._hass || !this.config?.device_id) return [];
 
     try {
-      // Utiliser l'API Home Assistant pour récupérer toutes les entités
-      const allEntityRegistry = await this._hass.callWS({
-        type: 'config/entity_registry/list'
-      });
+      const allEntityRegistry = await this.getEntityRegistry();
 
       // Récupérer les entités pour tous les device_id
       const allTrainEntities = [];
@@ -886,4 +901,12 @@ class SncfTrainCard extends HTMLElement {
 }
 
 // Définir l'élément custom
-customElements.define('sncf-train-card', SncfTrainCard);
+if (!customElements.get('sncf-train-card')) {
+  customElements.define('sncf-train-card', SncfTrainCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: 'sncf-train-card',
+    name: 'Trains SNCF',
+    description: 'Prochains trains d\'un trajet SNCF Trains',
+  });
+}

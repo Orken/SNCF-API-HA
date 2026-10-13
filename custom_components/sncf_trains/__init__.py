@@ -3,10 +3,9 @@
 from pathlib import Path
 from types import MappingProxyType
 from logging import getLogger
-from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.core import HomeAssistant, CoreState, EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_registry import Platform
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
@@ -41,26 +40,17 @@ LOGGER = getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up SNCF Trains component — register the Lovelace card."""
+    """Set up SNCF Trains component — register the Lovelace card.
 
-    async def _setup_frontend(_event: Any = None) -> None:
-        """Inner function to register frontend modules."""
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)]
-        )
-        add_extra_js_url(hass, CARD_URL)
-
-    if hass.state == CoreState.running:
-        LOGGER.debug(
-            "Home Assistant already running, registering frontend modules immediately."
-        )
-        await _setup_frontend()
-    else:
-        LOGGER.debug(
-            "Home Assistant not running yet, scheduling frontend module registration."
-        )
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _setup_frontend)
-
+    The card is registered right away (``frontend`` and ``http`` are loaded
+    first): waiting for ``EVENT_HOMEASSISTANT_STARTED`` meant a browser
+    opening the dashboard during start-up got a page without the card, and
+    Lovelace showed "Configuration error" until the next full reload.
+    """
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)]
+    )
+    add_extra_js_url(hass, CARD_URL)
     return True
 
 

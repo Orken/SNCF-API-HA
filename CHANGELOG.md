@@ -6,6 +6,7 @@ Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), b
 
 ### Corrections
 - **Carte Lovelace `sncf-train-card`** : les valeurs par défaut n'étaient jamais appliquées, si bien que les horaires de départ et d'arrivée restaient masqués et que le rafraîchissement tournait sans délai. Elle affiche aussi désormais les trains supprimés.
+- **« Configuration error » intermittent** : la carte est déclarée dès le chargement de l'intégration (et non plus à la fin du démarrage), et ne réinterroge plus tout le registre des entités à chaque changement d'état de la maison (elle utilise `hass.entities`).
 
 ## 1.4.0
 
