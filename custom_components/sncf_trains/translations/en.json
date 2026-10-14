@@ -1,0 +1,115 @@
+{
+  "title": "SNCF Trains",
+  "config": {
+    "step": {
+      "user": {
+        "title": "SNCF API key",
+        "description": "Enter your SNCF API key to get started.",
+        "data": {
+          "api_key": "API key"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "API Key not found. Please retry."
+    },
+    "abort": {
+      "reconfigure_successful": "Reconfiguration successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "description": "Set updated and outside intervals",
+        "data": {
+          "update_interval": "Update interval (minutes)",
+          "outside_interval": "Outside interval (minutes)"
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "train": {
+      "initiate_flow": {
+        "user": "Add journey",
+        "reconfigure": "Reconfigure a journey"
+      },
+      "entry_type": "Train",
+      "step": {
+        "departure_city": {
+          "title": "Select departure city",
+          "data": {
+            "departure_city": "City name"
+          }
+        },
+        "departure_station": {
+          "title": "Select departure station",
+          "data": {
+            "departure_station": "Station name"
+          }
+        },
+        "arrival_city": {
+          "title": "Select arrival city",
+          "data": {
+            "arrival_city": "City name"
+          }
+        },
+        "arrival_station": {
+          "title": "Select arrival station",
+          "data": {
+            "arrival_station": "Station name"
+          }
+        },
+        "time_range": {
+          "title": "Range hours",
+          "data": {
+            "time_start": "Start time",
+            "time_end": "End time (optional)",
+            "train_count": "Number of trains"
+          },
+          "data_description": {
+            "time_start": "First departure shown, as HH:MM.",
+            "time_end": "Optional, as HH:MM. Trains leaving after this time are not shown. Leave empty to always show the number of trains below.",
+            "train_count": "Maximum number of trains shown (1 to 10). Whichever limit is reached first ends the range: the last of these trains leaving, or the end time."
+          }
+        },
+        "reconfigure": {
+          "title": "Range hours",
+          "data": {
+            "time_start": "Start time",
+            "time_end": "End time (optional)",
+            "train_count": "Number of trains"
+          },
+          "data_description": {
+            "time_start": "First departure shown, as HH:MM.",
+            "time_end": "Optional, as HH:MM. Trains leaving after this time are not shown. Leave empty to always show the number of trains below.",
+            "train_count": "Maximum number of trains shown (1 to 10). Whichever limit is reached first ends the range: the last of these trains leaving, or the end time."
+          }
+        }
+      },
+      "error": {
+        "no_stations": "No station for this city",
+        "invalid_time": "Invalid time, expected HH:MM (e.g. 07:30)."
+      },
+      "abort": {
+        "already_configured_as_entry": "This journey is already configured",
+        "reconfigure_successful": "Journey reconfigured successfully"
+      }
+    }
+  },
+  "issues": {
+    "invalid_journey": {
+      "title": "Invalid SNCF journey: {title}",
+      "description": "The SNCF API rejects this journey: \"{reason}\".\n\nAs configured it can never return a train (unknown station, date outside published timetables…). Delete it and create it again, choosing a **station** for departure and arrival, in Settings → Devices & services → SNCF Trains."
+    },
+    "api_unavailable": {
+      "title": "SNCF API unreachable",
+      "description": "Several consecutive updates failed (last journey: {title}). The last known data is still displayed.\n\nCheck Home Assistant's Internet connection and the service status at https://www.digital.sncf.com/startup/api. This message clears itself once the API responds again."
+    },
+    "quota_exceeded": {
+      "title": "SNCF API quota exceeded",
+      "description": "The SNCF API rejects requests: your key's quota (5,000 requests per day) is used up (last journey: {title}). The last known data is still displayed.\n\nReduce the number of journeys or increase the update interval in the integration options. This message clears itself when the quota resets."
+    }
+  }
+}
