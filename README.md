@@ -38,7 +38,7 @@ Départ / arrivée, retards, durée, mode (TER…), tout est intégré dans une 
 4. Ajouter un trajet :
    - Ville et gare de départ
    - Ville et gare d'arrivée
-   - Plage horaire à surveiller
+   - Heure de début, nombre de trains et, si besoin, heure de fin
 
 Plusieurs trajets peuvent être configurés séparément.
 
@@ -54,7 +54,7 @@ Plusieurs trajets peuvent être configurés séparément.
 ### Par trajet (Reconfigurer un trajet)
 
 - 🚆 Nombre de trains affichés
-- 🕗 Heures de début et fin de surveillance
+- 🕗 Heure de début et heure de fin (facultative)
 
 ✅ Aucun redémarrage requis. Les modifications sont appliquées dynamiquement.
 
@@ -78,10 +78,23 @@ Obtenez votre clé ici : https://numerique.sncf.com/startup/api/
 |-----|-------------|
 | `update_interval` | Intervalle de mise à jour **pendant** la plage horaire (défaut : 2 min) |
 | `outside_interval` | Intervalle **hors** plage horaire (défaut : 60 min) |
-| `train_count` | Nombre de trains à afficher |
-| `time_start` / `time_end` | Plage horaire de surveillance (ex. : `06:00` → `09:00`). Seuls les trains **partant dans cette plage** (bornes incluses) sont affichés ; une plage peut traverser minuit (ex. `22:00` → `01:00`) |
+| `time_start` | Heure de début de la plage (ex. : `06:00`) : premier départ affiché |
+| `train_count` | Nombre **maximum** de trains affichés (1 à 10, obligatoire) |
+| `time_end` | Heure de fin **facultative** (ex. : `09:00`). Seuls les trains **partant avant** cette heure (incluse) sont affichés ; une plage peut traverser minuit (ex. `22:00` → `01:00`) |
 
-> 🕑 L'intervalle actif s'active automatiquement **2h avant** le début de plage.
+### 🕗 Plage horaire : heure de fin et nombre de trains
+
+La plage commence à `time_start` et se termine à la **première limite atteinte** :
+
+| Configuration | Trains affichés | Fin de la plage |
+|---------------|-----------------|-----------------|
+| `06:00`, 2 trains | Les 2 premiers trains après 6h | Départ du 2ᵉ train |
+| `06:00` → `12:00`, 2 trains | Les 2 premiers trains entre 6h et 12h | Départ du 2ᵉ train, ou 12h s'il y en a moins de 2 |
+| `06:00` → `07:00`, 5 trains | Les trains entre 6h et 7h (5 au plus) | 7h |
+
+Une fois la plage terminée, l'intégration affiche les trains de la plage du lendemain.
+
+> 🕑 L'intervalle actif s'active automatiquement **1h avant** le début de plage et dure jusqu'à la fin de la plage.
 
 ---
 

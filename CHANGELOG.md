@@ -2,6 +2,15 @@
 
 Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), basé sur la 1.3.3.
 
+## Non publié
+
+### Nouveautés
+- **Heure de fin facultative** : un trajet peut se configurer avec une heure de début et un nombre de trains seulement (« les 2 premiers trains après 6h »). Avec une heure de fin, la plage se termine à la première limite atteinte : départ du dernier train demandé, ou heure de fin. Une fois la plage terminée, les trains du lendemain s'affichent.
+- Le nombre de trains est limité à 1–10 et les heures sont vérifiées (format HH:MM) dans le formulaire. Le capteur « Tous les trains » se limite lui aussi au nombre de trains demandé.
+
+### Corrections
+- Le champ « Heure de fin » était libellé « Heure d'arrivée ».
+
 ## 1.4.3
 
 ### Corrections

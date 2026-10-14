@@ -64,6 +64,12 @@ def _create_subentry(
     return subentry
 
 
+def _window(coordinator: SncfUpdateCoordinator, time_start: str, time_end: str):
+    """Current or upcoming (start, end) window for a fixed time range."""
+    start = coordinator._initial_start(time_start, time_end)
+    return start, coordinator._fixed_end(start, time_end)
+
+
 def _realtime_calls(mock_fetch: AsyncMock) -> list:
     """Calls made for realtime data (excludes the planned timetable call)."""
     return [
@@ -479,8 +485,7 @@ def test_coordinator_adjust_update_interval_inside_window(hass):
         return_value=current_time,
     ):
         interval = coordinator._adjust_update_interval(
-            "07:00",
-            "10:00",
+            *_window(coordinator, "07:00", "10:00")
         )
 
     assert interval == timedelta(minutes=5)
@@ -502,8 +507,7 @@ def test_coordinator_adjust_update_interval_outside_window(hass):
         return_value=current_time,
     ):
         interval = coordinator._adjust_update_interval(
-            "07:00",
-            "10:00",
+            *_window(coordinator, "07:00", "10:00")
         )
 
     assert interval == timedelta(minutes=30)
@@ -525,8 +529,7 @@ def test_coordinator_adjust_update_interval_pre_start(hass):
         return_value=current_time,
     ):
         interval = coordinator._adjust_update_interval(
-            "07:00",
-            "10:00",
+            *_window(coordinator, "07:00", "10:00")
         )
 
     assert interval == timedelta(minutes=5)
@@ -548,8 +551,7 @@ def test_coordinator_adjust_update_interval_crosses_midnight(hass):
         return_value=current_time,
     ):
         interval = coordinator._adjust_update_interval(
-            "23:00",
-            "02:00",
+            *_window(coordinator, "23:00", "02:00")
         )
 
     assert interval == timedelta(minutes=5)

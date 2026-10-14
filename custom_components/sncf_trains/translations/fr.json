@@ -64,22 +64,33 @@
         "time_range": {
           "title": "Choisissez la plage horaire",
           "data": {
-            "time_start": "Heure de départ",
-            "time_end": "Heure d'arrivée",
+            "time_start": "Heure de début",
+            "time_end": "Heure de fin (facultative)",
             "train_count": "Nombre de trains"
+          },
+          "data_description": {
+            "time_start": "Premier départ affiché, au format HH:MM.",
+            "time_end": "Facultative, au format HH:MM. Les trains qui partent après cette heure ne sont pas affichés. Laissez vide pour toujours afficher le nombre de trains ci-dessous.",
+            "train_count": "Nombre maximum de trains affichés (1 à 10). La première limite atteinte termine la plage : départ du dernier de ces trains, ou heure de fin."
           }
         },
         "reconfigure": {
           "title": "Choisissez la plage horaire",
           "data": {
-            "time_start": "Heure de départ",
-            "time_end": "Heure d'arrivée",
+            "time_start": "Heure de début",
+            "time_end": "Heure de fin (facultative)",
             "train_count": "Nombre de trains"
+          },
+          "data_description": {
+            "time_start": "Premier départ affiché, au format HH:MM.",
+            "time_end": "Facultative, au format HH:MM. Les trains qui partent après cette heure ne sont pas affichés. Laissez vide pour toujours afficher le nombre de trains ci-dessous.",
+            "train_count": "Nombre maximum de trains affichés (1 à 10). La première limite atteinte termine la plage : départ du dernier de ces trains, ou heure de fin."
           }
         }
       },
       "error": {
-        "no_stations": "Aucune gare trouvée pour cette ville."
+        "no_stations": "Aucune gare trouvée pour cette ville.",
+        "invalid_time": "Heure invalide, format attendu HH:MM (ex. 07:30)."
       },
       "abort": {
         "already_configured_as_entry": "Ce trajet est déjà configuré.",

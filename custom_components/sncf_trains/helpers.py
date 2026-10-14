@@ -6,6 +6,8 @@ from typing import Any
 
 from homeassistant.util import dt as dt_util
 
+from .const import CONF_TIME_END, CONF_TIME_START, CONF_TRAIN_COUNT, DEFAULT_TRAIN_COUNT
+
 
 def parse_datetime(dt_str: str) -> datetime | None:
     """Parse string to datetime."""
@@ -145,3 +147,24 @@ def short_station_name(name: str) -> str:
     if match and match.group(1).strip().casefold() == match.group(2).strip().casefold():
         return match.group(1).strip()
     return name.strip()
+
+
+def time_range_label(data: dict[str, Any]) -> str:
+    """Plage d'un trajet : « 07:00 - 10:00 » ou « 07:00, 3 trains »."""
+    time_start = data[CONF_TIME_START]
+    if data.get(CONF_TIME_END):
+        return f"{time_start} - {data[CONF_TIME_END]}"
+    count = data.get(CONF_TRAIN_COUNT, DEFAULT_TRAIN_COUNT)
+    return f"{time_start}, {count} train{'s' if count > 1 else ''}"
+
+
+def time_range_id(data: dict[str, Any]) -> str:
+    """Partie plage horaire de l'identifiant unique d'un trajet."""
+    if data.get(CONF_TIME_END):
+        return f"{data[CONF_TIME_START]}_{data[CONF_TIME_END]}"
+    return f"{data[CONF_TIME_START]}_x{data.get(CONF_TRAIN_COUNT, DEFAULT_TRAIN_COUNT)}"
+
+
+def trip_title(dep_name: str, arr_name: str, data: dict[str, Any]) -> str:
+    """Titre d'un trajet."""
+    return f"Trajet: {dep_name} → {arr_name} ({time_range_label(data)})"

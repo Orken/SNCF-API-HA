@@ -25,17 +25,20 @@ from .const import (
     CONF_TIME_END,
     CONF_TIME_START,
     CONF_TO,
+    CONF_TRAIN_COUNT,
     CONF_UPDATE_INTERVAL,
     DEFAULT_OUTSIDE_INTERVAL,
+    DEFAULT_TRAIN_COUNT,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    MAX_TRAIN_COUNT,
 )
 from .disruptions import (
     mark_destination_deleted,
     merge_with_schedule,
     planned_departure,
 )
-from .helpers import short_station_name
+from .helpers import parse_datetime, short_station_name
 from .tracking import EVENT_STATUS_CHANGED, detect_changes
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,7 +50,7 @@ STORAGE_VERSION = 1
 FAILURES_BEFORE_ISSUE = 3
 
 # Nombre de trajets demandés à l'API par appel.
-JOURNEY_COUNT = 10
+JOURNEY_COUNT = MAX_TRAIN_COUNT
 
 
 class SncfUpdateCoordinator(DataUpdateCoordinator):
@@ -62,6 +65,10 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         # pour ne pas ré-annoncer les mêmes changements après un redémarrage.
         self.train_states: dict[str, dict[str, Any]] = {}
         self._store: Store | None = None
+
+        # Plage en cours ou à venir de chaque trajet : (début, fin). La fin
+        # dépend des trains (départ du dernier train affiché).
+        self._windows: dict[str, tuple[datetime, datetime]] = {}
 
         # Échecs réseau/quota consécutifs par trajet.
         self._failures: dict[str, int] = {}
@@ -117,21 +124,90 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         jour est passée, on regarde celle du lendemain. Une plage qui
         traverse minuit (fin <= début) se termine le lendemain du début.
         """
-        start = datetime.strptime(
-            self._build_datetime_param(time_start, time_end),
-            "%Y%m%dT%H%M%S",
+        return self._fixed_end(
+            self._parse_start(self._build_datetime_param(time_start, time_end)),
+            time_end,
         )
 
-        h_start, m_start = map(int, time_start.split(":"))
-        h_end, m_end = map(int, time_end.split(":"))
+    @staticmethod
+    def _now() -> datetime:
+        """Heure courante, toujours avec fuseau horaire."""
+        now = dt_util.now()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt_util.get_default_time_zone())
+        return now
 
-        end = start.replace(hour=h_end, minute=m_end)
-
-        if (h_end, m_end) <= (h_start, m_start):
-            end += timedelta(days=1)
-
+    @staticmethod
+    def _parse_start(datetime_str: str) -> datetime:
+        """Paramètre datetime de l'API → datetime avec fuseau horaire."""
         tz = dt_util.now().tzinfo or dt_util.get_default_time_zone()
-        return end.replace(tzinfo=tz)
+        return datetime.strptime(datetime_str, "%Y%m%dT%H%M%S").replace(tzinfo=tz)
+
+    @staticmethod
+    def _fixed_end(start: datetime, time_end: str) -> datetime:
+        """Heure de fin de la plage qui commence à `start`.
+
+        Une plage qui traverse minuit (fin <= début) se termine le
+        lendemain de son début.
+        """
+        h_end, m_end = map(int, time_end.split(":"))
+        end = start.replace(hour=h_end, minute=m_end)
+        if end <= start:
+            end += timedelta(days=1)
+        return end
+
+    @staticmethod
+    def _next_start(time_start: str, after: datetime) -> datetime:
+        """Premier début de plage strictement après `after`."""
+        h_start, m_start = map(int, time_start.split(":"))
+        start = after.replace(hour=h_start, minute=m_start, second=0, microsecond=0)
+        if start <= after:
+            start += timedelta(days=1)
+        return start
+
+    def _initial_start(self, time_start: str, time_end: str | None) -> datetime:
+        """Début de plage à interroger quand aucune plage n'est connue.
+
+        Sans heure de fin, la fin de plage dépend des trains : on part du
+        dernier début passé (la plage est peut-être encore en cours).
+        """
+        if time_end:
+            return self._parse_start(self._build_datetime_param(time_start, time_end))
+        now = self._now().replace(second=0, microsecond=0)
+        return self._next_start(time_start, now) - timedelta(days=1)
+
+    @staticmethod
+    def _window_end_from_trains(
+        start: datetime,
+        journeys: list[dict[str, Any]],
+        train_count: int,
+        fixed_end: datetime | None,
+    ) -> datetime:
+        """Fin de plage : la première limite atteinte.
+
+        La plage se termine au départ du dernier des `train_count` trains
+        affichés, sans dépasser l'heure de fin si elle est renseignée.
+        Sans heure de fin et avec moins de trains que demandé, elle se
+        termine au départ du dernier train (ou tout de suite s'il n'y en a
+        aucun).
+        """
+        departures = [
+            dep
+            for journey in journeys[:train_count]
+            if (
+                dep := parse_datetime(journey.get("departure_date_time", ""))
+                or planned_departure(journey)
+            )
+            is not None
+        ]
+        last = max(departures, default=None)
+
+        if fixed_end is not None:
+            if last is None or len(journeys) < train_count:
+                return fixed_end
+            return min(last, fixed_end)
+
+        return last if last is not None else start
 
     @staticmethod
     def _filter_by_window(
@@ -188,38 +264,13 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
 
     def _adjust_update_interval(
         self,
-        time_start,
-        time_end,
+        start: datetime,
+        end: datetime,
     ) -> timedelta | None:
         """Ajuste la fréquence selon la plage horaire."""
-        now = dt_util.now()
-
-        h_start, m_start = map(int, time_start.split(":"))
-        h_end, m_end = map(int, time_end.split(":"))
-
-        start = now.replace(
-            hour=h_start,
-            minute=m_start,
-            second=0,
-            microsecond=0,
-        )
-
-        end = now.replace(
-            hour=h_end,
-            minute=m_end,
-            second=0,
-            microsecond=0,
-        )
-
-        if end <= start:
-            end += timedelta(days=1)
+        now = self._now()
 
         pre_start = start - timedelta(hours=1)
-
-        if now < pre_start:
-            start -= timedelta(days=1)
-            end -= timedelta(days=1)
-            pre_start -= timedelta(days=1)
 
         in_fast_mode = pre_start <= now <= end
 
@@ -279,6 +330,184 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             if isinstance(journey, dict) and journey.get("nb_transfers", 0) == 0
         ]
 
+    async def _fetch_trip(
+        self,
+        subentry_id: str,
+        entry: Any,
+        start: datetime,
+        window_end: datetime | None,
+    ) -> list[dict[str, Any]] | None:
+        """Trains directs d'un trajet à partir de `start`.
+
+        Renvoie None si l'API n'a pas répondu (on garde alors les données
+        précédentes), une liste vide si le trajet est refusé.
+        """
+        max_retries = 3
+        retry_delay = 2
+
+        departure = entry.data[CONF_FROM]
+        arrival = entry.data[CONF_TO]
+        datetime_str = start.strftime("%Y%m%dT%H%M%S")
+
+        journeys = None
+        last_error = ""
+        invalid: SncfInvalidJourneyError | None = None
+
+        # ---------------------------------------------------------
+        # Appel API avec retry
+        # ---------------------------------------------------------
+        for attempt in range(1, max_retries + 1):
+            try:
+                journeys = await self.api_client.fetch_journeys(
+                    departure,
+                    arrival,
+                    datetime_str,
+                    count=JOURNEY_COUNT,
+                )
+
+                if journeys is not None:
+                    break
+
+            except SncfInvalidJourneyError as err:
+                # Inutile de réessayer : le trajet lui-même est refusé.
+                invalid = err
+                break
+
+            except (TimeoutError, ClientError, RuntimeError) as err:
+                last_error = (
+                    "quota" if isinstance(err, SncfQuotaError) else str(err)
+                )
+                _LOGGER.warning(
+                    "Erreur réseau lors de la récupération des trajets "
+                    "(tentative %d/%d) : %s",
+                    attempt,
+                    max_retries,
+                    err,
+                )
+
+            if attempt < max_retries:
+                await asyncio.sleep(retry_delay)
+
+        # ---------------------------------------------------------
+        # Vérification de la réponse API
+        # ---------------------------------------------------------
+        if invalid is not None:
+            _LOGGER.warning(
+                "Trajet '%s' refusé par l'API SNCF (%s) : %s",
+                entry.title,
+                invalid.error_id,
+                invalid.message,
+            )
+            self._raise_issue(
+                f"invalid_journey_{subentry_id}",
+                "invalid_journey",
+                ir.IssueSeverity.ERROR,
+                {
+                    "title": entry.title,
+                    "reason": invalid.message or invalid.error_id,
+                },
+            )
+            return []
+
+        self._clear_issue(f"invalid_journey_{subentry_id}")
+
+        if journeys is None or not isinstance(journeys, list):
+            failures = self._failures.get(subentry_id, 0) + 1
+            self._failures[subentry_id] = failures
+            _LOGGER.warning(
+                "Aucune donnée reçue de l'API SNCF pour le trajet '%s' "
+                "(%d échec(s) consécutif(s))",
+                entry.title,
+                failures,
+            )
+            if failures >= FAILURES_BEFORE_ISSUE:
+                self._raise_issue(
+                    "api_unavailable",
+                    "quota_exceeded"
+                    if last_error == "quota"
+                    else "api_unavailable",
+                    ir.IssueSeverity.WARNING,
+                    {"title": entry.title},
+                )
+            return None
+
+        self._failures[subentry_id] = 0
+
+        _LOGGER.debug(
+            "Trajet '%s' : %d journey(s) reçu(s) depuis l'API",
+            entry.title,
+            len(journeys),
+        )
+
+        # ---------------------------------------------------------
+        # Filtrage des trajets
+        #
+        # On ne teste plus le nombre de sections.
+        #
+        # Un trajet direct peut maintenant être représenté par :
+        #
+        #   crow_fly
+        #   public_transport
+        #   crow_fly
+        #
+        # tout en ayant nb_transfers = 0.
+        #
+        # nb_transfers est donc le critère approprié pour
+        # éliminer les trajets avec correspondance.
+        # ---------------------------------------------------------
+        filtered_journeys = []
+
+        for journey in journeys:
+            if not isinstance(journey, dict):
+                continue
+
+            if journey.get("nb_transfers", 0) == 0:
+                filtered_journeys.append(journey)
+
+        _LOGGER.debug(
+            "Trajet '%s' : %d journey(s) conservé(s) après filtrage "
+            "(sans correspondance)",
+            entry.title,
+            len(filtered_journeys),
+        )
+
+        # ---------------------------------------------------------
+        # Trains supprimés
+        #
+        # En temps réel, l'API retire les trains supprimés au lieu
+        # de les signaler. On compare donc avec les horaires
+        # théoriques : un train prévu mais absent du temps réel est
+        # marqué comme supprimé. Appel « best effort » : en cas
+        # d'échec on garde simplement les données temps réel.
+        # ---------------------------------------------------------
+        base_journeys = await self._fetch_base_schedule(
+            departure,
+            arrival,
+            datetime_str,
+            entry.title,
+        )
+
+        merged = merge_with_schedule(
+            filtered_journeys,
+            base_journeys,
+            arrival,
+            window_end=window_end,
+            # Moins de résultats que demandé : rien n'a été tronqué.
+            realtime_exhaustive=len(journeys) < JOURNEY_COUNT,
+        )
+
+        # Train qui ne dessert plus la gare d'arrivée : information
+        # seulement (il peut s'arrêter avant), pas une suppression.
+        mark_destination_deleted(merged, arrival)
+
+        # ---------------------------------------------------------
+        # Plage horaire : on ne garde que les trains qui partent
+        # avant l'heure de fin configurée.
+        # ---------------------------------------------------------
+        if window_end is None:
+            return merged
+        return self._filter_by_window(merged, window_end)
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Récupère les données de l'API SNCF."""
 
@@ -289,197 +518,56 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         update_intervals = []
         trains = {}
 
-        max_retries = 3
-        retry_delay = 2
-
         for subentry_id, entry in self.entry.subentries.items():
             _LOGGER.debug(
                 "Traitement du trajet : %s",
                 entry.title,
             )
 
-            departure = entry.data[CONF_FROM]
-            arrival = entry.data[CONF_TO]
             time_start = entry.data[CONF_TIME_START]
-            time_end = entry.data[CONF_TIME_END]
+            # Heure de fin facultative : sans elle, la plage se termine au
+            # départ du dernier des trains demandés.
+            time_end = entry.data.get(CONF_TIME_END) or None
+            train_count = entry.data.get(CONF_TRAIN_COUNT, DEFAULT_TRAIN_COUNT)
 
-            update_intervals.append(
-                self._adjust_update_interval(
-                    time_start,
-                    time_end,
-                )
-            )
-
-            datetime_str = self._build_datetime_param(
-                time_start,
-                time_end,
-            )
+            now = self._now()
+            known = self._windows.get(subentry_id)
+            if known is None:
+                start = self._initial_start(time_start, time_end)
+            elif now <= known[1]:
+                start = known[0]
+            else:
+                start = self._next_start(time_start, known[1])
 
             journeys = None
-            last_error = ""
-            invalid: SncfInvalidJourneyError | None = None
-
-            # ---------------------------------------------------------
-            # Appel API avec retry
-            # ---------------------------------------------------------
-            for attempt in range(1, max_retries + 1):
-                try:
-                    journeys = await self.api_client.fetch_journeys(
-                        departure,
-                        arrival,
-                        datetime_str,
-                        count=JOURNEY_COUNT,
-                    )
-
-                    if journeys is not None:
-                        break
-
-                except SncfInvalidJourneyError as err:
-                    # Inutile de réessayer : le trajet lui-même est refusé.
-                    invalid = err
+            # Deux essais au plus : si la plage interrogée est déjà finie
+            # (dernier train parti), on passe à la suivante.
+            for _ in range(2):
+                fixed_end = self._fixed_end(start, time_end) if time_end else None
+                journeys = await self._fetch_trip(subentry_id, entry, start, fixed_end)
+                if journeys is None:
                     break
-
-                except (TimeoutError, ClientError, RuntimeError) as err:
-                    last_error = (
-                        "quota" if isinstance(err, SncfQuotaError) else str(err)
-                    )
-                    _LOGGER.warning(
-                        "Erreur réseau lors de la récupération des trajets "
-                        "(tentative %d/%d) : %s",
-                        attempt,
-                        max_retries,
-                        err,
-                    )
-
-                if attempt < max_retries:
-                    await asyncio.sleep(retry_delay)
-
-            # ---------------------------------------------------------
-            # Vérification de la réponse API
-            # ---------------------------------------------------------
-            if invalid is not None:
-                _LOGGER.warning(
-                    "Trajet '%s' refusé par l'API SNCF (%s) : %s",
-                    entry.title,
-                    invalid.error_id,
-                    invalid.message,
+                journeys = journeys[:train_count]
+                end = self._window_end_from_trains(
+                    start, journeys, train_count, fixed_end
                 )
-                self._raise_issue(
-                    f"invalid_journey_{subentry_id}",
-                    "invalid_journey",
-                    ir.IssueSeverity.ERROR,
-                    {
-                        "title": entry.title,
-                        "reason": invalid.message or invalid.error_id,
-                    },
-                )
-                trains[subentry_id] = []
-                continue
+                self._windows[subentry_id] = (start, end)
+                if now <= end:
+                    break
+                start = self._next_start(time_start, end)
 
-            self._clear_issue(f"invalid_journey_{subentry_id}")
-
-            if journeys is None or not isinstance(journeys, list):
-                failures = self._failures.get(subentry_id, 0) + 1
-                self._failures[subentry_id] = failures
-                _LOGGER.warning(
-                    "Aucune donnée reçue de l'API SNCF pour le trajet '%s' "
-                    "(%d échec(s) consécutif(s))",
-                    entry.title,
-                    failures,
-                )
-                if failures >= FAILURES_BEFORE_ISSUE:
-                    self._raise_issue(
-                        "api_unavailable",
-                        "quota_exceeded"
-                        if last_error == "quota"
-                        else "api_unavailable",
-                        ir.IssueSeverity.WARNING,
-                        {"title": entry.title},
-                    )
+            if journeys is not None:
+                trains[subentry_id] = journeys
+            else:
                 # On garde les dernières données connues plutôt que de vider
                 # les capteurs pendant un incident passager.
                 previous = (self.data or {}).get(subentry_id)
                 if previous is not None:
                     trains[subentry_id] = previous
-                continue
 
-            self._failures[subentry_id] = 0
-
-            _LOGGER.debug(
-                "Trajet '%s' : %d journey(s) reçu(s) depuis l'API",
-                entry.title,
-                len(journeys),
-            )
-
-            # ---------------------------------------------------------
-            # Filtrage des trajets
-            #
-            # On ne teste plus le nombre de sections.
-            #
-            # Un trajet direct peut maintenant être représenté par :
-            #
-            #   crow_fly
-            #   public_transport
-            #   crow_fly
-            #
-            # tout en ayant nb_transfers = 0.
-            #
-            # nb_transfers est donc le critère approprié pour
-            # éliminer les trajets avec correspondance.
-            # ---------------------------------------------------------
-            filtered_journeys = []
-
-            for journey in journeys:
-                if not isinstance(journey, dict):
-                    continue
-
-                if journey.get("nb_transfers", 0) == 0:
-                    filtered_journeys.append(journey)
-
-            _LOGGER.debug(
-                "Trajet '%s' : %d journey(s) conservé(s) après filtrage "
-                "(sans correspondance)",
-                entry.title,
-                len(filtered_journeys),
-            )
-
-            # ---------------------------------------------------------
-            # Trains supprimés
-            #
-            # En temps réel, l'API retire les trains supprimés au lieu
-            # de les signaler. On compare donc avec les horaires
-            # théoriques : un train prévu mais absent du temps réel est
-            # marqué comme supprimé. Appel « best effort » : en cas
-            # d'échec on garde simplement les données temps réel.
-            # ---------------------------------------------------------
-            base_journeys = await self._fetch_base_schedule(
-                departure,
-                arrival,
-                datetime_str,
-                entry.title,
-            )
-
-            merged = merge_with_schedule(
-                filtered_journeys,
-                base_journeys,
-                arrival,
-                window_end=self._window_end(time_start, time_end),
-                # Moins de résultats que demandé : rien n'a été tronqué.
-                realtime_exhaustive=len(journeys) < JOURNEY_COUNT,
-            )
-
-            # Train qui ne dessert plus la gare d'arrivée : information
-            # seulement (il peut s'arrêter avant), pas une suppression.
-            mark_destination_deleted(merged, arrival)
-
-            # ---------------------------------------------------------
-            # Plage horaire : on ne garde que les trains qui partent
-            # avant l'heure de fin configurée.
-            # ---------------------------------------------------------
-            trains[subentry_id] = self._filter_by_window(
-                merged,
-                self._window_end(time_start, time_end),
-            )
+            window = self._windows.get(subentry_id)
+            if window is not None:
+                update_intervals.append(self._adjust_update_interval(*window))
 
         # -------------------------------------------------------------
         # Mise à jour de l'intervalle

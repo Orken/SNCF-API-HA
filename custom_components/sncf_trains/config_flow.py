@@ -30,12 +30,53 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     CONF_OUTSIDE_INTERVAL,
     DEFAULT_OUTSIDE_INTERVAL,
-    DEFAULT_TIME_END,
     DEFAULT_TIME_START,
     DEFAULT_TRAIN_COUNT,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    MAX_TRAIN_COUNT,
 )
+from .helpers import time_range_id, trip_title
+
+
+def _valid_time(value: str | None) -> bool:
+    """True pour une heure au format HH:MM."""
+    try:
+        hours, minutes = map(int, value.split(":"))
+    except (AttributeError, ValueError):
+        return False
+    return 0 <= hours < 24 and 0 <= minutes < 60
+
+
+def _time_range_schema() -> vol.Schema:
+    """Plage horaire : heure de fin facultative, nombre de trains requis."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_TIME_START, default=DEFAULT_TIME_START): str,
+            vol.Optional(CONF_TIME_END): str,
+            vol.Required(CONF_TRAIN_COUNT, default=DEFAULT_TRAIN_COUNT): vol.All(
+                int, vol.Range(min=1, max=MAX_TRAIN_COUNT)
+            ),
+        }
+    )
+
+
+def _time_range_errors(user_input: dict[str, Any]) -> dict[str, str]:
+    """Erreurs de saisie de la plage horaire."""
+    errors = {}
+    if not _valid_time(user_input.get(CONF_TIME_START)):
+        errors[CONF_TIME_START] = "invalid_time"
+    if user_input.get(CONF_TIME_END) and not _valid_time(user_input[CONF_TIME_END]):
+        errors[CONF_TIME_END] = "invalid_time"
+    return errors
+
+
+def _clean_time_range(data: dict[str, Any]) -> dict[str, Any]:
+    """Retire l'heure de fin quand elle est vide."""
+    data = dict(data)
+    if not data.get(CONF_TIME_END):
+        data.pop(CONF_TIME_END, None)
+    return data
 
 
 class SncfTrainsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -224,23 +265,31 @@ class TrainSubentryFlowHandler(ConfigSubentryFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
         """Handle the time range step."""
+        errors = {}
         if user_input is not None:
+            errors = _time_range_errors(user_input)
+        if user_input is not None and not errors:
+            user_input = _clean_time_range(user_input)
             dep_name = self.departure_options.get(self.departure_station, {}).get(
                 "name", self.departure_station
             )
             arr_name = self.arrival_options.get(self.arrival_station, {}).get(
                 "name", self.arrival_station
             )
-            time_start = user_input[CONF_TIME_START]
-            time_end = user_input[CONF_TIME_END]
-            unique_id = f"{self.departure_station}_{self.arrival_station}_{time_start}_{time_end}"
+            unique_id = "_".join(
+                (
+                    self.departure_station,
+                    self.arrival_station,
+                    time_range_id(user_input),
+                )
+            )
 
             for subentry in self.config_entry.subentries.values():
                 if unique_id == subentry.unique_id:
                     return self.async_abort(reason="already_configured_as_entry")
 
             return self.async_create_entry(
-                title=f"Trajet: {dep_name} → {arr_name} ({time_start} - {time_end})",
+                title=trip_title(dep_name, arr_name, user_input),
                 data={
                     CONF_FROM: self.departure_station,
                     CONF_TO: self.arrival_station,
@@ -252,13 +301,10 @@ class TrainSubentryFlowHandler(ConfigSubentryFlow):
             )
         return self.async_show_form(
             step_id="time_range",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_TIME_START, default=DEFAULT_TIME_START): str,
-                    vol.Required(CONF_TIME_END, default=DEFAULT_TIME_END): str,
-                    vol.Required(CONF_TRAIN_COUNT, default=DEFAULT_TRAIN_COUNT): int,
-                }
+            data_schema=self.add_suggested_values_to_schema(
+                _time_range_schema(), user_input or {}
             ),
+            errors=errors,
         )
 
     async def async_step_reconfigure(
@@ -267,30 +313,32 @@ class TrainSubentryFlowHandler(ConfigSubentryFlow):
         """User flow to modify an existing entry."""
         config_subentry = self._get_reconfigure_subentry()
 
+        errors = {}
         if user_input is not None:
+            errors = _time_range_errors(user_input)
+        if user_input is not None and not errors:
             data = config_subentry.data.copy()
+            # Champ vidé : il est absent de user_input, on le retire.
+            data.pop(CONF_TIME_END, None)
             data.update(user_input)
+            data = _clean_time_range(data)
 
             return self.async_update_and_abort(
                 self._get_entry(),
                 config_subentry,
                 data=data,
-                title=f"Trajet: {data[CONF_DEPARTURE_NAME]} → {data[CONF_ARRIVAL_NAME]} ({data[CONF_TIME_START]} - {data[CONF_TIME_END]})",
+                title=trip_title(
+                    data[CONF_DEPARTURE_NAME], data[CONF_ARRIVAL_NAME], data
+                ),
             )
-
-        DATA_SCHEMA = vol.Schema(
-            {
-                vol.Required(CONF_TIME_START, default=DEFAULT_TIME_START): str,
-                vol.Required(CONF_TIME_END, default=DEFAULT_TIME_END): str,
-                vol.Required(CONF_TRAIN_COUNT, default=DEFAULT_TRAIN_COUNT): int,
-            }
-        )
 
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self.add_suggested_values_to_schema(
-                DATA_SCHEMA, config_subentry.data
+                _time_range_schema(),
+                user_input if user_input is not None else config_subentry.data,
             ),
+            errors=errors,
         )
 
     async_step_user = async_step_departure_city

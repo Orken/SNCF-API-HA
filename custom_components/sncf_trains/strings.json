@@ -59,22 +59,33 @@
         "time_range": {
           "title": "Range hours",
           "data": {
-            "time_start": "Time start",
-            "time_end": "Time end",
-            "train_count": "Trains count"
+            "time_start": "Start time",
+            "time_end": "End time (optional)",
+            "train_count": "Number of trains"
+          },
+          "data_description": {
+            "time_start": "First departure shown, as HH:MM.",
+            "time_end": "Optional, as HH:MM. Trains leaving after this time are not shown. Leave empty to always show the number of trains below.",
+            "train_count": "Maximum number of trains shown (1 to 10). Whichever limit is reached first ends the range: the last of these trains leaving, or the end time."
           }
         },
         "reconfigure": {
           "title": "Range hours",
           "data": {
-            "time_start": "Time start",
-            "time_end": "Time end",
-            "train_count": "Trains count"
+            "time_start": "Start time",
+            "time_end": "End time (optional)",
+            "train_count": "Number of trains"
+          },
+          "data_description": {
+            "time_start": "First departure shown, as HH:MM.",
+            "time_end": "Optional, as HH:MM. Trains leaving after this time are not shown. Leave empty to always show the number of trains below.",
+            "train_count": "Maximum number of trains shown (1 to 10). Whichever limit is reached first ends the range: the last of these trains leaving, or the end time."
           }
         }
       },
       "error": {
-        "no_stations": "No station for this city"
+        "no_stations": "No station for this city",
+        "invalid_time": "Invalid time, expected HH:MM (e.g. 07:30)."
       },
       "abort": {
         "already_configured_as_entry": "Already train is configured",
