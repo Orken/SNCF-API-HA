@@ -37,8 +37,10 @@ type SncfDataConfigEntry = ConfigEntry[SncfUpdateCoordinator]
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.CALENDAR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-CARD_URL = "/sncf_trains/sncf-train-card.js"
-CARD_FILE = Path(__file__).parent / "www" / "sncf-train-card.js"
+CARD_URL = "/sncf_trains/sncf-trains-cards.js"
+CARD_FILE = Path(__file__).parent / "www" / "sncf-trains-cards.js"
+# Ancienne carte (jusqu'à 1.5.x) : sa ressource est reprise pour les cartes.
+LEGACY_CARD_URLS = ("/sncf_trains/sncf-train-card.js",)
 LOGGER = getLogger(__name__)
 
 
@@ -83,7 +85,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def _async_register_lovelace_resource(hass: HomeAssistant, card_url: str) -> None:
-    """Create or update the card's Lovelace resource (storage mode only)."""
+    """Create or update the cards' Lovelace resource (storage mode only).
+
+    A resource left by the former card is reused and pointed at the new file.
+    """
     lovelace = hass.data.get("lovelace")
     if lovelace is None or getattr(lovelace, "resource_mode", None) != "storage":
         return
@@ -95,7 +100,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, card_url: str) 
     existing = [
         item
         for item in resources.async_items()
-        if str(item.get("url", "")).split("?", 1)[0] == CARD_URL
+        if str(item.get("url", "")).split("?", 1)[0] in (CARD_URL, *LEGACY_CARD_URLS)
     ]
     if not existing:
         await resources.async_create_item({"res_type": "module", "url": card_url})

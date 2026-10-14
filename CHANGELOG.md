@@ -2,6 +2,17 @@
 
 Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), basé sur la 1.3.3.
 
+## Non publié
+
+### Nouveautés
+- **Trois cartes Lovelace** au choix, chargées automatiquement : **prochain train** (`sncf-train-tile`, compte à rebours), **tableau des départs** (`sncf-departure-board`, façon écran en gare) et **frise des départs** (`sncf-train-timeline`). Éditeur visuel, thème clair et sombre, textes en français ou en anglais, appui sur un train pour ouvrir sa fiche.
+
+### Changements incompatibles
+- **L'ancienne carte `sncf-train-card` est supprimée.** Les tableaux de bord qui l'utilisent affichent une erreur : remplacez-la par l'une des trois nouvelles cartes. Sa ressource Lovelace est reprise automatiquement.
+
+### Corrections
+- Traduction anglaise rétablie : les formulaires affichaient les noms techniques des champs (`departure_station`…) avec Home Assistant en anglais.
+
 ## 1.5.0
 
 ### Nouveautés

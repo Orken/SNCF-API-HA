@@ -2,7 +2,11 @@
 
 from types import SimpleNamespace
 
-from custom_components.sncf_trains import CARD_URL, _async_register_lovelace_resource
+from custom_components.sncf_trains import (
+    CARD_URL,
+    LEGACY_CARD_URLS,
+    _async_register_lovelace_resource,
+)
 
 
 class FakeResources:
@@ -65,3 +69,15 @@ async def test_yaml_mode_is_left_alone():
     res = FakeResources()
     await _async_register_lovelace_resource(_hass(res, mode="yaml"), f"{CARD_URL}?v=2")
     assert res.async_items() == []
+
+
+async def test_legacy_card_resource_is_replaced():
+    res = FakeResources(
+        [
+            {"id": "1", "url": f"{LEGACY_CARD_URLS[0]}?v=1.5.0", "type": "module"},
+            {"id": "2", "url": "/hacsfiles/x.js", "type": "module"},
+        ]
+    )
+    await _async_register_lovelace_resource(_hass(res), f"{CARD_URL}?v=2")
+    urls = sorted(i["url"] for i in res.async_items())
+    assert urls == ["/hacsfiles/x.js", f"{CARD_URL}?v=2"]

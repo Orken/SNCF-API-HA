@@ -201,47 +201,65 @@ Les problèmes persistants apparaissent dans **Paramètres → Réparations** (e
 
 ---
 
-## 🎨 Carte Lovelace — SNCF Train Card
+## 🎨 Cartes Lovelace
 
-La carte `sncf-train-card` est **automatiquement disponible** dans le sélecteur de cartes dès l'installation de l'intégration.
+L'intégration fournit **trois cartes**, chargées automatiquement : rien à installer en plus. Dans un tableau de bord, cliquer sur **+ Ajouter une carte**, chercher **SNCF** et choisir celle qui convient. L'éditeur visuel permet de choisir le ou les trajets à afficher.
 
-### Ajouter la carte
+![Les trois cartes](./assets/cartes_lovelace.png)
 
-Dans un tableau de bord, cliquer sur **+ Ajouter une carte** → chercher **SNCF Train Card**.
+| Carte | Type | Pour quoi faire |
+|-------|------|-----------------|
+| **Prochain train** | `custom:sncf-train-tile` | Savoir d'un coup d'œil s'il faut partir : compte à rebours, retard, trains suivants |
+| **Tableau des départs** | `custom:sncf-departure-board` | Les prochains départs façon écran en gare, lisible de loin (tablette murale) |
+| **Frise des départs** | `custom:sncf-train-timeline` | Les trains de la plage sur une ligne de temps : trous de desserte, ampleur des retards |
 
-La configuration peut ensuite se faire :
+Un appui sur un train ouvre la fiche de son capteur. Les couleurs suivent le thème de Home Assistant (le tableau des départs garde ses couleurs de gare). Les textes sont en français ou en anglais selon la langue du profil.
 
-- via l'éditeur visuel Lovelace
-- ou via YAML
+### Paramètres
 
-Ou en YAML :
+Communs aux trois cartes :
+
+| Paramètre | Type | Défaut | Description |
+|-----------|------|--------|-------------|
+| `device_id` | `string` \| `array` | **obligatoire** | Trajet(s) à afficher (appareils de l'intégration). Plusieurs trajets sont fusionnés et triés par heure de départ |
+| `title` | `string` | nom du trajet | Titre de la carte |
+
+Propres à chaque carte :
+
+| Carte | Paramètre | Défaut | Description |
+|-------|-----------|--------|-------------|
+| `sncf-train-tile` | `next_count` | `3` | Nombre de trains suivants affichés sous le prochain (0 à 5) |
+| `sncf-departure-board` | `rows` | `6` | Nombre de lignes du tableau |
+| `sncf-departure-board` | `show_departed` | `true` | Garde les trains partis (grisés) jusqu'à la fin de la plage |
+| `sncf-train-timeline` | `start` / `end` | heures pleines autour des trains | Bornes de la frise (`HH:MM`) |
+
+### Exemples
 
 ```yaml
-type: custom:sncf-train-card
-device_id: VOTRE_DEVICE_ID
+type: custom:sncf-train-tile
+device_id: abc123def456
+next_count: 3
 ```
 
-#### ✨ Support Multi-Devices
-
-Vous pouvez afficher les trajets de **plusieurs appareils sur une seule carte**, avec un tri chronologique par date d'arrivée :
-
 ```yaml
-type: custom:sncf-train-card
+type: custom:sncf-departure-board
 device_id:
-  - DEVICE_ID_1
-  - DEVICE_ID_2
-  - DEVICE_ID_3
-title: 'Tous Mes Trajets'
-train_lines: 10
+  - abc123def456
+  - def456ghi789
+title: Départs
+rows: 8
 ```
 
-> **Rétrocompatibilité** : L'ancien format (`device_id: DEVICE_ID`) continue de fonctionner et est automatiquement converti en tableau.
+```yaml
+type: custom:sncf-train-timeline
+device_id: abc123def456
+start: "06:00"
+end: "12:00"
+```
 
 ### 🔍 Trouver le `device_id`
 
-_S'obtient dynamiquement via la configuration visuelle._
-
-Le `device_id` correspond à l'appareil créé lors de la configuration du trajet.
+L'éditeur visuel le remplit pour vous. En YAML, le `device_id` est celui de l'appareil créé pour le trajet :
 
 1. Aller dans **Paramètres → Appareils & services → SNCF Trains**
 2. Cliquer sur le trajet souhaité
@@ -249,57 +267,7 @@ Le `device_id` correspond à l'appareil créé lors de la configuration du traje
 
 > ![Exemple d'identifiant](./assets/device_id_url.png)
 
-### ⚙️ Paramètres de la carte
-
-| Paramètre | Type | Défaut | Description |
-|-----------|------|--------|-------------|
-| `device_id` | `string` \| `array[string]` | **obligatoire** | Identifiant(s) de l'appareil(s) SNCF. Peut être une chaîne unique ou un tableau de plusieurs IDs (voir ci-dessus) |
-| `title` | `string` | `'Trains SNCF'` | Titre affiché en haut de la carte |
-| `train_lines` | `number` | `3` | Nombre de trains affichés simultanément |
-| `animation_duration` | `number` | `30` | Nombre de minutes avant l'arrivée en gare à partir duquel l'animation du train se déclenche (ex : `30` = animation active dans les 30 dernières minutes, `60` = dans la dernière heure) |
-| `update_interval` | `number` | `30000` | Intervalle de rafraîchissement de la carte en **millisecondes** |
-| `train_emoji_axial_symmetry` | `boolean` | `true` | Retourne l'emoji du train horizontalement |
-| `train_emoji` | `string` | `'🚅'` | Emoji du train animé sur la barre |
-| `show_departure_station` | `boolean` | `true` | Affiche ou masque les informations de départ |
-| `departure_station_emoji` | `string` | `''` | Emoji de la station de départ |
-| `show_arrival_station` | `boolean` | `true` | Affiche ou masque les informations d'arrivée |
-| `arrival_station_emoji` | `string` | `'🚉'` | Emoji de la station d'arrivée |
-
-### Exemples
-
-**Single device :**
-```yaml
-type: custom:sncf-train-card
-device_id: abc123def456
-title: "Paris → Lyon"
-train_lines: 4
-train_emoji: "🚆"
-train_emoji_axial_symmetry: true
-show_departure_station: true
-departure_station_emoji: "🚉"
-show_arrival_station: true
-arrival_station_emoji: "🏙️"
-animation_duration: 0
-update_interval: 60000
-```
-
-**Multiple devices (fusionnés et triés par date d'arrivée) :**
-```yaml
-type: custom:sncf-train-card
-device_id:
-  - abc123def456
-  - def456ghi789
-  - ghi789jkl123
-title: "Tous Mes Trajets SNCF"
-train_lines: 10
-train_emoji: "🚄"
-update_interval: 30000
-```
-
-### Exemple d'affichage
-
-![Exemple d'affichage](./assets/card_example.png)
-![Exemple d'affichage](./assets/card_example.png)
+> L'ancienne carte `sncf-train-card` a été retirée en 2.0.0 : remplacez-la par l'une des trois cartes ci-dessus.
 
 ---
 
@@ -313,9 +281,9 @@ update_interval: 30000
 
 <img width="1027" height="579" alt="image" src="https://github.com/user-attachments/assets/cfc83131-4048-4b1e-a3eb-e114e6de3f70" />
 
-**Dashboard Lovelace :**
+**Cartes Lovelace :**
 
-<img width="315" height="360" alt="dashboard" src="https://github.com/user-attachments/assets/033fd0ce-ab61-4e54-83de-4bdb85d8aa58" />
+![Les trois cartes Lovelace](./assets/cartes_lovelace.png)
 
 ---
 
@@ -327,12 +295,11 @@ Structure :
 - `__init__.py` : enregistrement de l'intégration et de la carte Lovelace
 - `calendar.py` : calendrier
 - `config_flow.py` : assistant UI de configuration
-- `options_flow.py` : formulaire d’options dynamiques
 - `sensor.py` : entités de capteurs
 - `coordinator.py` : logique de récupération intelligente
-- `translations/fr.json` : interface en français
+- `translations/fr.json`, `translations/en.json` : interface en français et en anglais
 - `manifest.json` : métadonnées et dépendances
-- `www/sncf-train-card.js` : carte Lovelace personnalisée
+- `www/sncf-trains-cards.js` : les trois cartes Lovelace (prochain train, tableau des départs, frise)
 
 ---
 
