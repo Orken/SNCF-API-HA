@@ -2,7 +2,7 @@
 
 Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), basé sur la 1.3.3.
 
-## Non publié
+## 2.1.1
 
 ### Corrections
 - **Cartes en « Configuration error » au chargement du tableau de bord** : quand la page s'affiche avant que Home Assistant ait transmis la liste des entités (fréquent avec le cache du navigateur, la page étant alors très rapide), la carte plantait et restait en erreur jusqu'au rechargement suivant.
