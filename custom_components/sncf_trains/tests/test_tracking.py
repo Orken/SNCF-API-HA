@@ -235,6 +235,44 @@ async def test_coordinator_fires_event_once(hass):
     assert data["arrival_name"] == "Saint-Agne"
 
 
+@pytest.mark.asyncio
+async def test_coordinator_saves_states_only_when_they_change(hass):
+    """Every update (2 min) used to write the states to disk."""
+    subentry = MagicMock()
+    subentry.title = "Trajet"
+    subentry.data = {
+        CONF_FROM: "stop_area:a",
+        CONF_TO: "stop_area:b",
+        CONF_TIME_START: "07:30",
+        CONF_TIME_END: "09:00",
+    }
+    entry = MagicMock(spec=ConfigEntry)
+    entry.data = {CONF_API_KEY: "key"}
+    entry.options = {}
+    entry.subentries = {"sub": subentry}
+    realtime = [_journey("870302", "20261014T074700")]
+
+    async def fake_fetch(*args, data_freshness="realtime", **kwargs):
+        return list(realtime)
+
+    coordinator = SncfUpdateCoordinator(hass, entry)
+    coordinator.api_client = AsyncMock()
+    coordinator.api_client.fetch_journeys = AsyncMock(side_effect=fake_fetch)
+    coordinator._store = MagicMock()
+
+    with patch(
+        "custom_components.sncf_trains.coordinator.dt_util.now",
+        return_value=datetime(2026, 10, 13, 20, 0),
+    ):
+        await coordinator._async_update_data()
+        await coordinator._async_update_data()
+        assert coordinator._store.async_delay_save.call_count == 1
+
+        realtime[0] = _journey("870302", "20261014T074700", delay=5)
+        await coordinator._async_update_data()
+        assert coordinator._store.async_delay_save.call_count == 2
+
+
 def test_train_sensor_created_for_empty_slot(hass):
     """A slot with no train yet is created empty instead of crashing."""
     from custom_components.sncf_trains.sensor import SncfTrainSensor

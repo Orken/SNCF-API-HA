@@ -23,6 +23,9 @@ Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), b
 - **Diagnostics** : téléchargeables même quand l'installation a échoué (API injoignable au démarrage).
 - **Cartes : jour du départ** : un train dans plusieurs jours affiche sa date (« 19/10 ») et un train parti la veille « hier », au lieu de « demain ».
 - **Cartes : appareil renommé** : la destination du tableau des départs n'est plus vide et la gare de départ n'est plus remplacée par le nom de l'appareil.
+- **Réparation « API injoignable » bloquée** : elle disparaît dès que l'API répond de nouveau, même pour refuser un trajet. Elle pouvait rester affichée indéfiniment.
+- **Migration relancée à chaque démarrage** (installations venant de la 1.3) : la version de l'entrée est maintenant mise à jour.
+- **Écritures sur le disque** : l'état des trains n'est enregistré que lorsqu'un statut change, et non plus à chaque mise à jour (toutes les 2 minutes).
 
 ### Technique
 - Tests des cartes Lovelace (`node --test tests/cards.test.mjs`), lancés par la CI.

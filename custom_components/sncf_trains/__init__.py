@@ -187,4 +187,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: SncfDataConfigEntry) -
         )
         hass.config_entries.async_add_subentry(entry, subentry)
 
+    # Sans version à jour, Home Assistant relance la migration à chaque démarrage.
+    if entry.minor_version < 2:
+        hass.config_entries.async_update_entry(entry, minor_version=2)
+
     return True

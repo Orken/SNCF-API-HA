@@ -190,6 +190,25 @@ async def test_outage_keeps_data_and_raises_repair_after_several_failures(hass):
 
 
 @pytest.mark.asyncio
+async def test_invalid_journey_after_outage_clears_unavailable_repair(hass):
+    """The API answers again, even to refuse the journey: it is reachable."""
+    coordinator = _coordinator(hass)
+    coordinator.api_client.fetch_journeys = AsyncMock(return_value=None)
+    with _now(), patch("custom_components.sncf_trains.coordinator.asyncio.sleep"):
+        for _ in range(FAILURES_BEFORE_ISSUE):
+            await coordinator._async_update_data()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "api_unavailable")
+
+    coordinator.api_client.fetch_journeys = AsyncMock(
+        side_effect=SncfInvalidJourneyError("unknown_object", "Invalid id")
+    )
+    with _now():
+        await coordinator._async_update_data()
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "api_unavailable") is None
+
+
+@pytest.mark.asyncio
 async def test_quota_repair_uses_quota_text(hass):
     coordinator = _coordinator(hass)
     coordinator.api_client.fetch_journeys = AsyncMock(

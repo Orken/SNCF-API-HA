@@ -399,6 +399,8 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         # Vérification de la réponse API
         # ---------------------------------------------------------
         if invalid is not None:
+            # L'API a répondu, même pour refuser le trajet : elle est joignable.
+            self._failures[subentry_id] = 0
             _LOGGER.warning(
                 "Trajet '%s' refusé par l'API SNCF (%s) : %s",
                 entry.title,
@@ -637,7 +639,7 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         if now.tzinfo is None:
             now = now.replace(tzinfo=dt_util.get_default_time_zone())
 
-        events, self.train_states = detect_changes(
+        events, states = detect_changes(
             self.train_states,
             trains,
             trip_info,
@@ -648,5 +650,9 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Changement de statut : %s", event)
             self.hass.bus.async_fire(EVENT_STATUS_CHANGED, event)
 
-        if self._store is not None:
+        # Écriture sur le disque seulement si un statut a changé, et non à
+        # chaque mise à jour.
+        changed = states != self.train_states
+        self.train_states = states
+        if changed and self._store is not None:
             self._store.async_delay_save(lambda: self.train_states, 10)

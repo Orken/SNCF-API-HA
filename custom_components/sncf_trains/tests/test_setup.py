@@ -16,6 +16,7 @@ from custom_components.sncf_trains.const import (
     CONF_ARRIVAL_NAME,
     CONF_DEPARTURE_NAME,
     CONF_FROM,
+    CONF_TIME_END,
     CONF_TIME_START,
     CONF_TO,
     CONF_TRAIN_COUNT,
@@ -106,3 +107,67 @@ async def test_setup_refreshes_once_and_fills_every_entity(hass):
     )
     assert hass.states.get(line).state == "2"
     assert hass.states.get(calendar).attributes["message"] == "Muret → Toulouse"
+
+
+# --- Migration ----------------------------------------------------------------
+
+
+async def _setup(hass, entry):
+    api = AsyncMock()
+    api.fetch_journeys = AsyncMock(side_effect=_fetch)
+    with patch(
+        "custom_components.sncf_trains.coordinator.SncfApiClient",
+        return_value=api,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_entry_from_version_1_3_is_migrated_once(hass):
+    """1.3.x: one entry per journey, API key and time range in the options."""
+    entry = MockConfigEntry(
+        version=1,
+        minor_version=1,
+        domain=DOMAIN,
+        title="Muret → Toulouse",
+        data={
+            CONF_FROM: "stop_area:dep",
+            CONF_TO: "stop_area:arr",
+            CONF_DEPARTURE_NAME: "Muret",
+            CONF_ARRIVAL_NAME: "Toulouse",
+        },
+        options={
+            CONF_API_KEY: "key",
+            CONF_TIME_START: "07:00",
+            CONF_TIME_END: "09:00",
+            CONF_TRAIN_COUNT: 2,
+        },
+        source=config_entries.SOURCE_USER,
+    )
+    entry.add_to_hass(hass)
+
+    await _setup(hass, entry)
+
+    assert entry.data == {CONF_API_KEY: "key"}
+    (subentry,) = entry.subentries.values()
+    assert subentry.data[CONF_TIME_END] == "09:00"
+    # Version à jour : Home Assistant ne relance pas la migration.
+    assert entry.minor_version == 2
+
+
+async def test_entry_with_nothing_to_migrate_gets_current_version(hass):
+    entry = MockConfigEntry(
+        version=1,
+        minor_version=1,
+        domain=DOMAIN,
+        title="Trains SNCF",
+        data={CONF_API_KEY: "key"},
+        source=config_entries.SOURCE_USER,
+        unique_id="sncf_trains",
+    )
+    entry.add_to_hass(hass)
+
+    await _setup(hass, entry)
+
+    assert entry.data == {CONF_API_KEY: "key"}
+    assert entry.minor_version == 2
