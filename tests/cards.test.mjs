@@ -46,7 +46,7 @@ function makeHass(trains, devices = { dev1: { name: DEVICE } }) {
   return { locale: { language: "fr" }, devices, entities, states };
 }
 
-/** HTML d'une carte, rendue à l'heure ``now``. */
+/** HTML d'une carte, rendue à l'heure ``now`` (``hass`` : un objet, ou plusieurs reçus à la suite). */
 function render(type, config, hass, now) {
   const fixed = new Date(now).getTime();
   class FakeDate extends Date {
@@ -88,7 +88,7 @@ function render(type, config, hass, now) {
 
   const card = new elements[type]();
   card.setConfig(config);
-  card.hass = hass;
+  for (const value of [hass].flat()) card.hass = value;
   return card.shadowRoot.innerHTML;
 }
 
@@ -170,3 +170,20 @@ test("frise : une plage dans trois jours affiche sa date", () => {
 
   assert.match(html, /19\/10 · 07:00 – 09:00/);
 });
+
+/* ------------------------------------------------------------------ */
+/* Chargement de la page                                               */
+/* ------------------------------------------------------------------ */
+
+for (const type of ["sncf-train-tile", "sncf-departure-board", "sncf-train-timeline"]) {
+  test(`${type} : affichée avant l'arrivée du registre des entités`, () => {
+    // Home Assistant affiche la page dès que les états sont là :
+    // hass.entities et hass.devices valent encore null.
+    const hass = makeHass([{ planned: "2026-10-14T08:47:00+02:00" }]);
+    const loading = { ...hass, entities: null, devices: null };
+
+    const html = render(type, { device_id: "dev1" }, [loading, hass], "2026-10-14T08:00:00+02:00");
+
+    assert.match(html, /08:47/);
+  });
+}

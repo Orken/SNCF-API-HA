@@ -204,7 +204,9 @@ class SncfBaseCard extends HTMLElement {
     }
     this._config = { ...this.constructor.defaults, ...config, device_id: toArray(config.device_id) };
     this._signature = null;
+    // Au chargement de la page, hass.entities vaut null : aucun capteur.
     this._entitiesRef = null;
+    this._entityIds = [];
     this._render();
   }
 
