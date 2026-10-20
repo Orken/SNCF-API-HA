@@ -81,3 +81,26 @@ async def test_legacy_card_resource_is_replaced():
     await _async_register_lovelace_resource(_hass(res), f"{CARD_URL}?v=2")
     urls = sorted(i["url"] for i in res.async_items())
     assert urls == ["/hacsfiles/x.js", f"{CARD_URL}?v=2"]
+
+
+async def test_home_assistant_before_2026_2_uses_mode():
+    """Up to 2026.1, LovelaceData names the resource mode ``mode``."""
+    res = FakeResources()
+    hass = SimpleNamespace(
+        data={"lovelace": SimpleNamespace(mode="storage", resources=res)}
+    )
+
+    await _async_register_lovelace_resource(hass, f"{CARD_URL}?v=2")
+
+    assert [i["url"] for i in res.async_items()] == [f"{CARD_URL}?v=2"]
+
+
+async def test_yaml_mode_before_2026_2_is_left_alone():
+    res = FakeResources()
+    hass = SimpleNamespace(
+        data={"lovelace": SimpleNamespace(mode="yaml", resources=res)}
+    )
+
+    await _async_register_lovelace_resource(hass, f"{CARD_URL}?v=2")
+
+    assert res.async_items() == []

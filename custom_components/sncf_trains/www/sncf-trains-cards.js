@@ -36,6 +36,7 @@ const TEXTS = {
     state: "État",
     trains: "trains",
     tomorrow: "demain",
+    yesterday: "hier",
     not_served: "Ne dessert plus la gare d'arrivée",
     legend_late: "En retard (trait = retard)",
     // Éditeur
@@ -66,6 +67,7 @@ const TEXTS = {
     state: "Status",
     trains: "trains",
     tomorrow: "tomorrow",
+    yesterday: "yesterday",
     not_served: "No longer serves the arrival station",
     legend_late: "Delayed (line = delay)",
     device_id: "Journeys",
@@ -114,8 +116,15 @@ function formatTime(date) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-function sameDay(a, b) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+/** Jour d'un départ par rapport à aujourd'hui : "", « demain », « hier » ou « 19/10 ». */
+function dayLabel(hass, date, now) {
+  const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  // Arrondi : les jours de changement d'heure durent 23 ou 25 heures.
+  const days = Math.round((midnight(date) - midnight(now)) / (24 * 60 * MINUTE));
+  if (days === 0) return "";
+  if (days === 1) return t(hass, "tomorrow");
+  if (days === -1) return t(hass, "yesterday");
+  return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function toArray(value) {
@@ -123,12 +132,15 @@ function toArray(value) {
   return value ? [value] : [];
 }
 
-/** Nom du trajet à partir de l'appareil : « SNCF A → B » → { from: A, to: B }. */
-function routeOf(hass, deviceId) {
+/**
+ * Trajet : nom de l'appareil (titre, éventuellement renommé) et gares, lues
+ * sur les attributs du capteur, sinon dans le nom « SNCF A → B ».
+ */
+function routeOf(hass, deviceId, attributes = {}) {
   const device = hass?.devices?.[deviceId];
   const name = (device?.name_by_user || device?.name || "").replace(/^SNCF\s+/, "");
   const [from = "", to = ""] = name.split(/\s*→\s*/);
-  return { name, from, to };
+  return { name, from: attributes.departure_name || from, to: attributes.arrival_name || to };
 }
 
 /** Un capteur « Train N » → train normalisé, ou null pour les autres capteurs. */
@@ -166,7 +178,7 @@ function toTrain(hass, entityId, deviceId, now) {
     status,
     cause: a.disruption_message || "",
     destinationServed: a.destination_served !== false,
-    route: routeOf(hass, deviceId),
+    route: routeOf(hass, deviceId, a),
   };
 }
 
@@ -377,7 +389,8 @@ class SncfTrainTile extends SncfBaseCard {
         : minutes < 180
           ? `${minutes >= 60 ? `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}` : minutes}<span>${minutes >= 60 ? "" : this._t("min")}</span>`
           : formatTime(train.real);
-      const day = sameDay(train.real, now) ? "" : `${this._t("tomorrow")} `;
+      const dayText = dayLabel(this._hass, train.real, now);
+      const day = dayText ? `${dayText} ` : "";
       main = `<div class="big num">${big}</div>
         <div class="dep num">${train.depDelay ? `<s>${formatTime(train.planned)}</s>` : day}<b>${formatTime(train.real)}</b></div>`;
       const label = train.status === "delayed" ? `${this._t("delayed")} +${train.delay} ${this._t("min")}` : this._t("on_time");
@@ -467,9 +480,12 @@ class SncfDepartureBoard extends SncfBaseCard {
     if (!this._config.show_departed) trains = trains.filter((tr) => tr.status !== "departed");
     trains = trains.slice(0, Number(this._config.rows) || 6);
 
-    const route = routeOf(this._hass, this._config.device_id[0]);
     const title = this._config.title || this._t("departures");
-    const station = this._config.title ? "" : route.from;
+    // Gare(s) de départ des trains affichés, sinon celle du premier trajet.
+    const froms = [...new Set(trains.map((tr) => tr.route.from).filter(Boolean))];
+    const station = this._config.title
+      ? ""
+      : froms.join(" · ") || routeOf(this._hass, this._config.device_id[0]).from;
 
     const rows = trains.map((tr) => {
       const state = {
@@ -481,7 +497,8 @@ class SncfDepartureBoard extends SncfBaseCard {
       const via = tr.status === "cancelled" || !tr.destinationServed
         ? tr.cause || (tr.destinationServed ? "" : this._t("not_served"))
         : "";
-      const day = sameDay(tr.planned, now) ? "" : `<span class="via">${this._t("tomorrow")}</span>`;
+      const dayText = dayLabel(this._hass, tr.planned, now);
+      const day = dayText ? `<span class="via">${dayText}</span>` : "";
       return `<tr class="${tr.status}" data-entity="${escapeHtml(tr.entityId)}" tabindex="0">
         <td class="t num">${formatTime(tr.planned)}${day}</td>
         <td class="dest"><span class="dest-name">${escapeHtml(tr.route.to)}</span>${via ? `<span class="via">${escapeHtml(via)}</span>` : ""}</td>
@@ -624,7 +641,8 @@ class SncfTrainTimeline extends SncfBaseCard {
           <text x="${x(now).toFixed(1)}" y="${AXIS + 62}" text-anchor="middle">${this._t("now")}</text></g>`
       : "";
 
-    const day = sameDay(start, now) ? "" : `${this._t("tomorrow")} · `;
+    const dayText = dayLabel(this._hass, start, now);
+    const day = dayText ? `${dayText} · ` : "";
     return `<ha-card><div class="wrap">
       <div class="head"><h2>${escapeHtml(title)}</h2>
         <span class="num">${day}${formatTime(start)} – ${formatTime(end)} · ${trains.length} ${this._t("trains")}</span></div>

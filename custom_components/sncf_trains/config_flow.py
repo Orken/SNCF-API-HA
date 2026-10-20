@@ -349,10 +349,21 @@ class TrainSubentryFlowHandler(ConfigSubentryFlow):
             data.pop(CONF_TIME_END, None)
             data.update(user_input)
             data = _clean_time_range(data)
+            # L'identifiant suit la plage horaire : sinon l'ancienne plage
+            # reste « déjà configurée » et la nouvelle peut être ajoutée deux fois.
+            unique_id = "_".join((data[CONF_FROM], data[CONF_TO], time_range_id(data)))
+
+            for subentry in self._get_entry().subentries.values():
+                if (
+                    subentry.subentry_id != config_subentry.subentry_id
+                    and subentry.unique_id == unique_id
+                ):
+                    return self.async_abort(reason="already_configured_as_entry")
 
             return self.async_update_and_abort(
                 self._get_entry(),
                 config_subentry,
+                unique_id=unique_id,
                 data=data,
                 title=trip_title(
                     data[CONF_DEPARTURE_NAME], data[CONF_ARRIVAL_NAME], data

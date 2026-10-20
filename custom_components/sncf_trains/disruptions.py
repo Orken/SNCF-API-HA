@@ -13,7 +13,7 @@ Assistant.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from .helpers import get_train_num, parse_datetime
@@ -29,6 +29,7 @@ STATUS_DEPARTED = "departed"
 STATUS_CANCELLED = "cancelled"
 
 EFFECT_NO_SERVICE = "NO_SERVICE"
+EFFECT_SIGNIFICANT_DELAYS = "SIGNIFICANT_DELAYS"
 
 # Most severe first, used to pick the disruption shown to the user.
 _EFFECT_SEVERITY = [
@@ -108,20 +109,31 @@ def _simplify_disruption(disruption: dict[str, Any]) -> dict[str, Any]:
             if cause:
                 break
 
-    # Stops removed from the train's route (partial cancellation).
+    # Stops removed from the train's route (partial cancellation), and
+    # amended times per stop (UIC code -> HHMMSS): the only times known for
+    # a late train the realtime planner dropped because another overtook it.
     deleted_stops: list[str] = []
+    amended_times: dict[str, dict[str, str]] = {}
     for obj in disruption.get("impacted_objects") or []:
         for stop in (obj or {}).get("impacted_stops") or []:
             if not isinstance(stop, dict):
                 continue
+            point = stop.get("stop_point") or {}
+            area = point.get("stop_area") or {}
+            code = _stop_code(str(point.get("id") or area.get("id") or ""))
+            times = {
+                kind: str(stop[f"amended_{kind}_time"])
+                for kind in ("departure", "arrival")
+                if stop.get(f"amended_{kind}_time")
+            }
+            if code and times:
+                amended_times[code] = times
             if "deleted" not in (
                 stop.get("stop_time_effect"),
                 stop.get("departure_status"),
                 stop.get("arrival_status"),
             ):
                 continue
-            point = stop.get("stop_point") or {}
-            area = point.get("stop_area") or {}
             for value in (point.get("id"), area.get("id"), point.get("name")):
                 if value:
                     deleted_stops.append(str(value))
@@ -132,6 +144,7 @@ def _simplify_disruption(disruption: dict[str, Any]) -> dict[str, Any]:
         "message": message or str(cause),
         "cause": str(cause),
         "deleted_stops": deleted_stops,
+        "amended_times": amended_times,
     }
 
 
@@ -150,6 +163,25 @@ def _disruption_trip_names(disruption: dict[str, Any]) -> set[str]:
             if value:
                 names.add(str(value))
     return names
+
+
+def _applies_on(disruption: dict[str, Any], departure: datetime | None) -> bool:
+    """True if the departure falls within one of the disruption's periods.
+
+    Without periods (or departure), the disruption is assumed to apply.
+    """
+    periods = [
+        (
+            parse_datetime(period.get("begin") or ""),
+            parse_datetime(period.get("end") or ""),
+        )
+        for period in disruption.get("application_periods") or []
+        if isinstance(period, dict)
+    ]
+    periods = [(begin, end) for begin, end in periods if begin and end]
+    if not periods or departure is None:
+        return True
+    return any(begin <= departure <= end for begin, end in periods)
 
 
 def _linked_disruption_ids(journey: dict[str, Any]) -> set[str]:
@@ -179,7 +211,8 @@ def attach_disruptions(
     """Attach the disruptions affecting each journey (in place).
 
     A disruption affects a journey when the journey links to it, or when it
-    impacts a trip carrying the same train number.
+    impacts a trip carrying the same train number on that day (train numbers
+    come back every day: tomorrow's cancellation is not today's).
     """
     by_id: dict[str, dict[str, Any]] = {}
     by_train: dict[str, list[dict[str, Any]]] = {}
@@ -200,8 +233,10 @@ def attach_disruptions(
             if dis_id in by_id:
                 found[dis_id] = by_id[dis_id]
         num = get_train_num(journey)
+        departure = planned_departure(journey)
         for disruption in by_train.get(num, []) if num else []:
-            found[str(disruption.get("id") or id(disruption))] = disruption
+            if _applies_on(disruption, departure):
+                found[str(disruption.get("id") or id(disruption))] = disruption
         journey[KEY_DISRUPTIONS] = [_simplify_disruption(d) for d in found.values()]
 
 
@@ -230,6 +265,63 @@ def _is_cancelled_by_disruption(journey: dict[str, Any]) -> bool:
     )
 
 
+def _is_delayed_by_disruption(journey: dict[str, Any]) -> bool:
+    return any(
+        d.get("effect") == EFFECT_SIGNIFICANT_DELAYS
+        for d in journey.get(KEY_DISRUPTIONS) or []
+    )
+
+
+def _amended_datetime(base: str, amended_time: str) -> str | None:
+    """Move a Navitia datetime ("20261014T084700") to an amended time ("100500")."""
+    try:
+        base_dt = datetime.strptime(base[:15], "%Y%m%dT%H%M%S")
+        amended = datetime.combine(
+            base_dt.date(), datetime.strptime(amended_time, "%H%M%S").time()
+        )
+    except ValueError:
+        return None
+    # Delay past midnight: 23:50 -> 00:10 the next day.
+    if amended < base_dt - timedelta(hours=12):
+        amended += timedelta(days=1)
+    return amended.strftime("%Y%m%dT%H%M%S")
+
+
+def _apply_amended_times(
+    journey: dict[str, Any], departure_id: str | None, arrival_id: str | None
+) -> None:
+    """Replace the planned times by the disruption's amended ones (in place).
+
+    The sections are copied first: ``journey`` is a shallow copy of a
+    base schedule journey, which must stay untouched.
+    """
+    amended: dict[str, dict[str, str]] = {}
+    for dis in journey.get(KEY_DISRUPTIONS) or []:
+        for code, times in (dis.get("amended_times") or {}).items():
+            amended.setdefault(code, {}).update(times)
+    departure = amended.get(_stop_code(departure_id or ""), {}).get("departure")
+    arrival = amended.get(_stop_code(arrival_id or ""), {}).get("arrival")
+    if not (departure or arrival):
+        return
+
+    journey["sections"] = [
+        dict(section) if isinstance(section, dict) else section
+        for section in journey.get("sections") or []
+    ]
+    section = transport_section(journey)
+    for key, amended_time in (
+        ("departure_date_time", departure),
+        ("arrival_date_time", arrival),
+    ):
+        if not amended_time:
+            continue
+        base = section.get(f"base_{key}") or section.get(key) or journey.get(key)
+        value = _amended_datetime(str(base or ""), amended_time)
+        if value:
+            section[key] = value
+            journey[key] = value
+
+
 # ---------------------------------------------------------------------------
 # Merge
 # ---------------------------------------------------------------------------
@@ -241,6 +333,7 @@ def merge_with_schedule(
     arrival_id: str | None = None,
     window_end: datetime | None = None,
     realtime_exhaustive: bool = False,
+    departure_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Merge realtime journeys with the planned timetable.
 
@@ -254,9 +347,14 @@ def merge_with_schedule(
       than requested, so nothing was cut off) and it was planned before
       ``window_end``.
 
-    Exception: a planned train missing only because a disruption removed
-    its stop at ``arrival_id`` is added back flagged "destination not
-    served", not cancelled.
+    Exceptions, the train itself still runs:
+
+    * a disruption removed its stop at ``arrival_id``: it is added back
+      flagged "destination not served";
+    * a disruption reports significant delays: the realtime planner drops
+      a late train overtaken by the next one. It is added back flagged
+      delayed, with the disruption's amended times at ``departure_id`` and
+      ``arrival_id`` when known.
 
     The result is sorted by planned departure.
     """
@@ -309,6 +407,9 @@ def merge_with_schedule(
             # The realtime planner drops it because it no longer reaches
             # the destination; the train itself still runs.
             added[KEY_DESTINATION_DELETED] = True
+        elif not confirmed and _is_delayed_by_disruption(journey):
+            added[KEY_STATUS] = STATUS_DELAYED
+            _apply_amended_times(added, departure_id, arrival_id)
         else:
             added[KEY_STATUS] = STATUS_CANCELLED
         merged.append(added)
@@ -374,7 +475,11 @@ def journey_status(
         return STATUS_CANCELLED
     if now is not None and has_departed(journey, now):
         return STATUS_DEPARTED
-    return STATUS_DELAYED if delay_minutes > 0 else STATUS_ON_TIME
+    # Train added back as delayed by merge_with_schedule, even when the
+    # disruption gives no amended times.
+    if delay_minutes > 0 or journey.get(KEY_STATUS) == STATUS_DELAYED:
+        return STATUS_DELAYED
+    return STATUS_ON_TIME
 
 
 def journey_cause(journey: dict[str, Any]) -> str | None:

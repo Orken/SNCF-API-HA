@@ -26,6 +26,7 @@ from custom_components.sncf_trains.disruptions import (
     main_disruption,
     merge_with_schedule,
 )
+from custom_components.sncf_trains.tracking import journey_delay
 
 
 def _journey(
@@ -60,9 +61,16 @@ def _journey(
     }
 
 
-def _disruption(dis_id: str, effect: str, train: str, text: str = "") -> dict:
+def _disruption(
+    dis_id: str,
+    effect: str,
+    train: str,
+    text: str = "",
+    periods: list | None = None,
+) -> dict:
     return {
         "id": dis_id,
+        "application_periods": periods or [],
         "severity": {"effect": effect},
         "messages": [{"text": text}] if text else [],
         "impacted_objects": [
@@ -73,6 +81,40 @@ def _disruption(dis_id: str, effect: str, train: str, text: str = "") -> dict:
                     "trip": {"id": f"trip:{train}", "name": train},
                 },
                 "impacted_stops": [{"cause": "Panne de signalisation"}],
+            }
+        ],
+    }
+
+
+def _late_disruption(train: str, stops: list[tuple[str, str, str]]) -> dict:
+    """SIGNIFICANT_DELAYS disruption: (UIC code, base time, amended time)."""
+    return {
+        "id": f"late-{train}",
+        "severity": {"effect": "SIGNIFICANT_DELAYS"},
+        "messages": [{"text": "Retard de 78 min"}],
+        "impacted_objects": [
+            {
+                "pt_object": {
+                    "embedded_type": "trip",
+                    "name": train,
+                    "trip": {"id": f"trip:{train}", "name": train},
+                },
+                "impacted_stops": [
+                    {
+                        "stop_point": {
+                            "id": f"stop_point:SNCF:{code}:Train",
+                            "stop_area": {"id": f"stop_area:SNCF:{code}"},
+                        },
+                        "base_departure_time": base,
+                        "amended_departure_time": amended,
+                        "base_arrival_time": base,
+                        "amended_arrival_time": amended,
+                        "stop_time_effect": "delayed",
+                        "departure_status": "delayed",
+                        "arrival_status": "delayed",
+                    }
+                    for code, base, amended in stops
+                ],
             }
         ],
     }
@@ -153,6 +195,65 @@ def test_merge_realtime_journey_with_no_service_status():
     assert merged[0][KEY_STATUS] == STATUS_CANCELLED
 
 
+def test_merge_overtaken_late_train_is_delayed_not_cancelled():
+    """The realtime planner drops a train overtaken by the next one."""
+    realtime = [
+        _journey("870302", "20261014T074700"),
+        _journey("870306", "20261014T094900"),
+    ]
+    late = _journey("870304", "20261014T084700")
+    base = [_journey("870302", "20261014T074700"), late]
+    attach_disruptions(
+        [late],
+        [
+            _late_disruption(
+                "870304",
+                [("87611806", "084700", "100500"), ("87611301", "084700", "100500")],
+            )
+        ],
+    )
+
+    merged = merge_with_schedule(
+        realtime,
+        base,
+        "stop_area:SNCF:87611301",
+        departure_id="stop_area:SNCF:87611806",
+    )
+
+    assert merged[1][KEY_STATUS] == STATUS_DELAYED
+    assert merged[1]["departure_date_time"] == "20261014T100500"
+    assert journey_delay(merged[1]) == 78
+    # Base schedule untouched.
+    assert late["departure_date_time"] == "20261014T084700"
+    assert late["sections"][1]["departure_date_time"] == "20261014T084700"
+
+
+def test_merge_overtaken_late_train_without_amended_times_is_delayed():
+    realtime = [_journey("870306", "20261014T094900")]
+    late = _journey("870304", "20261014T084700")
+    late[KEY_DISRUPTIONS] = [{"effect": "SIGNIFICANT_DELAYS", "message": "Retard"}]
+
+    merged = merge_with_schedule(realtime, [late])
+
+    assert merged[0][KEY_STATUS] == STATUS_DELAYED
+    assert journey_status(merged[0], journey_delay(merged[0])) == STATUS_DELAYED
+
+
+def test_merge_amended_time_after_midnight_is_next_day():
+    realtime = [_journey("870306", "20261015T005000")]
+    late = _journey("870304", "20261014T235000")
+    attach_disruptions(
+        [late], [_late_disruption("870304", [("87611806", "235000", "001000")])]
+    )
+
+    merged = merge_with_schedule(
+        realtime, [late], departure_id="stop_area:SNCF:87611806"
+    )
+
+    assert merged[0]["departure_date_time"] == "20261015T001000"
+    assert journey_delay(merged[0]) == 20
+
+
 def test_merge_does_not_mutate_base_schedule():
     realtime = [_journey("870306", "20261014T094900")]
     planned = _journey("870304", "20261014T084700")
@@ -191,10 +292,39 @@ def test_attach_disruptions_by_link_and_by_train_number():
             "message": "Retard de 20 min",
             "cause": "Panne de signalisation",
             "deleted_stops": [],
+            "amended_times": {},
         }
     ]
     assert by_number[KEY_DISRUPTIONS][0]["effect"] == "NO_SERVICE"
     assert untouched[KEY_DISRUPTIONS] == []
+
+
+@pytest.mark.parametrize(
+    ("begin", "end", "attached"),
+    [
+        ("20261015T000000", "20261015T235959", False),
+        ("20261013T000000", "20261013T235959", False),
+        ("20261014T000000", "20261014T235959", True),
+    ],
+)
+def test_disruption_by_train_number_only_on_its_dates(begin, end, attached):
+    """Train numbers come back every day: tomorrow's cancellation is not today's."""
+    journey = _journey("870304", "20261014T084700")
+
+    attach_disruptions(
+        [journey],
+        [
+            _disruption(
+                "dis-2",
+                "NO_SERVICE",
+                "870304",
+                "Train supprimé",
+                periods=[{"begin": begin, "end": end}],
+            )
+        ],
+    )
+
+    assert bool(journey[KEY_DISRUPTIONS]) is attached
 
 
 def test_disruption_message_falls_back_to_cause():
@@ -273,6 +403,52 @@ async def test_coordinator_reports_cancelled_train(hass):
 
 
 @pytest.mark.asyncio
+async def test_coordinator_shows_amended_departure_of_overtaken_train(hass):
+    subentry = MagicMock()
+    subentry.title = "L'Isle-Jourdain → Saint-Agne"
+    subentry.data = {
+        CONF_FROM: "stop_area:SNCF:87611806",
+        CONF_TO: "stop_area:SNCF:87611301",
+        CONF_TIME_START: "07:30",
+        CONF_TIME_END: "09:00",
+    }
+    entry = MagicMock(spec=ConfigEntry)
+    entry.data = {CONF_API_KEY: "key"}
+    entry.options = {}
+    entry.subentries = {"sub": subentry}
+
+    realtime = [
+        _journey("870302", "20261014T074700"),
+        _journey("870306", "20261014T094900"),
+    ]
+    planned = [
+        _journey("870302", "20261014T074700"),
+        _journey("870304", "20261014T084700"),
+        _journey("870306", "20261014T094900"),
+    ]
+    attach_disruptions(
+        planned, [_late_disruption("870304", [("87611806", "084700", "100500")])]
+    )
+
+    async def fake_fetch(*args, data_freshness="realtime", **kwargs):
+        return planned if data_freshness == "base_schedule" else realtime
+
+    coordinator = SncfUpdateCoordinator(hass, entry)
+    coordinator.api_client = AsyncMock()
+    coordinator.api_client.fetch_journeys = AsyncMock(side_effect=fake_fetch)
+
+    with patch(
+        "custom_components.sncf_trains.coordinator.dt_util.now",
+        return_value=datetime(2026, 10, 14, 7, 0),
+    ):
+        data = await coordinator._async_update_data()
+
+    late = data["sub"][1]
+    assert late[KEY_STATUS] == STATUS_DELAYED
+    assert late["departure_date_time"] == "20261014T100500"
+
+
+@pytest.mark.asyncio
 async def test_coordinator_survives_base_schedule_failure(hass):
     subentry = MagicMock()
     subentry.title = "t"
@@ -310,6 +486,7 @@ async def test_coordinator_survives_base_schedule_failure(hass):
 # ---------------------------------------------------------------------------
 # Last train of the window
 # ---------------------------------------------------------------------------
+
 
 def _window_end():
     """18:30 local time, computed in the test's time zone."""

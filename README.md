@@ -104,7 +104,8 @@ En temps réel, l'API SNCF (Navitia) **retire** les trains supprimés de ses ré
 Cette version interroge donc aussi les **horaires théoriques** (`data_freshness=base_schedule`) et les compare au temps réel :
 
 - un train prévu mais absent du temps réel (avant le dernier train temps réel renvoyé) est marqué **supprimé** ;
-- une perturbation `NO_SERVICE` sur le train le marque aussi comme supprimé.
+- une perturbation `NO_SERVICE` sur le train le marque aussi comme supprimé (aux dates de la perturbation seulement : le même numéro de train circule chaque jour) ;
+- un train prévu mais absent du temps réel avec une perturbation « retard important » (`SIGNIFICANT_DELAYS`) n'est **pas** marqué supprimé : très en retard, il a été dépassé par le train suivant. Il est affiché **en retard**, avec les horaires corrigés quand la SNCF les donne ;
 - un train qui **ne s'arrête plus à la gare d'arrivée** (arrêt supprimé par la SNCF) n'est **pas** marqué supprimé (il peut s'arrêter avant) : l'information est remontée via `destination_served: false` et l'événement.
 
 ![Train supprimé détecté sur un tableau de bord (tuile « ❌ Supprimé · Indisponibilité d'un matériel »)](./assets/trains_supprimes.png)
@@ -122,6 +123,7 @@ Nouveaux attributs sur chaque capteur de train :
 | `departure_delay_minutes` / `arrival_delay_minutes` | Retard au départ / à l'arrivée ; `delay_minutes` vaut le plus grand des deux |
 | `disruption_effect` | Effet de la perturbation la plus grave (`NO_SERVICE`, `SIGNIFICANT_DELAYS`…) |
 | `disruption_message` | Explication : message de la perturbation, sinon cause indiquée sur le train, sinon message du trajet, sinon « Arrêt X supprimé » |
+| `departure_name` / `arrival_name` | Gares du trajet, comme dans le nom de l'appareil ; les cartes les utilisent même si l'appareil est renommé |
 
 Le capteur « Tous les trains (ligne) » expose aussi `status` et `cancelled_count`, et le calendrier préfixe les trains supprimés par « ❌ Supprimé ».
 

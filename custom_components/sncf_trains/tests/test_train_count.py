@@ -189,6 +189,76 @@ async def test_reconfigure_clears_end_time(hass):
     )
 
 
+def _existing_trip(time_start, time_end) -> dict:
+    return {
+        "data": {
+            "from": "stop_area:dep",
+            "to": "stop_area:arr",
+            "departure_name": "Paris Gare de Lyon",
+            "arrival_name": "Lyon Part Dieu",
+            "time_start": time_start,
+            "time_end": time_end,
+            "train_count": 5,
+        },
+        "subentry_type": "train",
+        "title": "Existing train",
+        "unique_id": f"stop_area:dep_stop_area:arr_{time_start}_{time_end}",
+    }
+
+
+async def _reconfigure(hass, entry, subentry_id, user_input):
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "train"),
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "subentry_id": subentry_id,
+        },
+    )
+    return await hass.config_entries.subentries.async_configure(
+        result["flow_id"], user_input=user_input
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_updates_unique_id(hass):
+    """The old time range can be added again, the new one cannot."""
+    entry = _main_entry(hass, (_existing_trip("07:00", "10:00"),))
+    subentry_id = next(iter(entry.subentries))
+
+    result = await _reconfigure(
+        hass,
+        entry,
+        subentry_id,
+        {CONF_TIME_START: "17:00", CONF_TIME_END: "19:00", CONF_TRAIN_COUNT: 5},
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.subentries[subentry_id].unique_id == (
+        "stop_area:dep_stop_area:arr_17:00_19:00"
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_onto_another_trip_is_refused(hass):
+    entry = _main_entry(
+        hass, (_existing_trip("07:00", "10:00"), _existing_trip("17:00", "19:00"))
+    )
+    morning_id = next(
+        sid for sid, sub in entry.subentries.items() if "07:00" in sub.unique_id
+    )
+
+    result = await _reconfigure(
+        hass,
+        entry,
+        morning_id,
+        {CONF_TIME_START: "17:00", CONF_TIME_END: "19:00", CONF_TRAIN_COUNT: 5},
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured_as_entry"
+    assert entry.subentries[morning_id].data[CONF_TIME_START] == "07:00"
+
+
 # ---------------------------------------------------------------------------
 # Coordinator: end of window
 # ---------------------------------------------------------------------------

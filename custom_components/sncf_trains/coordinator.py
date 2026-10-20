@@ -501,6 +501,8 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
             window_end=window_end,
             # Moins de résultats que demandé : rien n'a été tronqué.
             realtime_exhaustive=len(journeys) < JOURNEY_COUNT,
+            # Horaires corrigés d'un train en retard dépassé par le suivant.
+            departure_id=departure,
         )
 
         # Train qui ne dessert plus la gare d'arrivée : information

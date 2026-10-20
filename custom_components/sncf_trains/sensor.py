@@ -36,7 +36,7 @@ from .helpers import (
     parse_datetime,
     short_station_name,
 )
-from .tracking import journey_departure_delay, journey_uid
+from .tracking import journey_delay, journey_departure_delay, journey_uid
 
 
 async def async_setup_entry(
@@ -48,11 +48,11 @@ async def async_setup_entry(
 
     coordinator: SncfUpdateCoordinator = entry.runtime_data
 
+    # Pas de update_before_add : les capteurs partent des données du premier
+    # rafraîchissement, déjà fait (un rafraîchissement de plus par appel
+    # sinon, soit autant d'appels à l'API).
     # Capteur global "Trajets"
-    async_add_entities(
-        [SncfJourneySensor(coordinator)],
-        update_before_add=True,
-    )
+    async_add_entities([SncfJourneySensor(coordinator)])
 
     for subentry in entry.subentries.values():
         # On crée toujours le nombre de capteurs demandé : un créneau sans
@@ -84,7 +84,6 @@ async def async_setup_entry(
         async_add_entities(
             sensors,
             config_subentry_id=subentry.subentry_id,
-            update_before_add=True,
         )
 
 
@@ -250,6 +249,11 @@ class SncfTrainSensor(
 
         self.departure = entry.data[CONF_FROM]
         self.arrival = entry.data[CONF_TO]
+        # Noms de l'appareil, lus par les cartes : l'appareil peut être renommé.
+        self.departure_name = short_station_name(
+            entry.data.get(CONF_DEPARTURE_NAME, "")
+        )
+        self.arrival_name = short_station_name(entry.data.get(CONF_ARRIVAL_NAME, ""))
 
         self._attr_name = f"Train {journey_id + 1}"
 
@@ -365,6 +369,8 @@ class SncfTrainSensor(
             "has_delay": delay > 0,
             "departure_stop_id": self.departure,
             "arrival_stop_id": self.arrival,
+            "departure_name": self.departure_name,
+            "arrival_name": self.arrival_name,
             "direction": display_informations.get(
                 "direction",
                 "",
@@ -411,11 +417,18 @@ class SncfAllTrainsLineSensor(
             coordinator.entry.subentries[train_id]
         )
 
+        self._update_from_data()
+
     @callback
     def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self._update_from_data()
+        self.async_write_ha_state()
+
+    def _update_from_data(self) -> None:
         """Update all trains values on a single line."""
 
-        journeys = self.coordinator.data.get(
+        journeys = (self.coordinator.data or {}).get(
             self.tid,
             [],
         )
@@ -434,25 +447,9 @@ class SncfAllTrainsLineSensor(
 
             section = get_transport_section(journey)
 
-            arr_dt = parse_datetime(
-                journey.get(
-                    "arrival_date_time",
-                    "",
-                )
-            )
-
-            base_arr_dt = parse_datetime(
-                section.get(
-                    "base_arrival_date_time",
-                    "",
-                )
-            )
-
-            delay = (
-                int((arr_dt - base_arr_dt).total_seconds() / 60)
-                if arr_dt and base_arr_dt
-                else 0
-            )
+            # Même retard que les capteurs « Train N » : le plus grand du
+            # départ et de l'arrivée.
+            delay = journey_delay(journey)
 
             departure_times.append(
                 format_time(
@@ -492,5 +489,3 @@ class SncfAllTrainsLineSensor(
         }
 
         self._attr_native_value = len(journeys)
-
-        self.async_write_ha_state()

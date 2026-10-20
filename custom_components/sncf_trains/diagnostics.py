@@ -43,7 +43,8 @@ async def async_get_config_entry_diagnostics(
     # -----------------------------------------------------------------
     # Récupération du coordinator
     # -----------------------------------------------------------------
-    coordinator = entry.runtime_data
+    # Absent quand l'installation a échoué (API injoignable au démarrage).
+    coordinator = getattr(entry, "runtime_data", None)
 
     if coordinator is None:
         data["coordinator"] = {

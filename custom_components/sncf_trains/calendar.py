@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from . import SncfDataConfigEntry
 from .const import (
@@ -20,6 +21,7 @@ from .const import (
 from .coordinator import SncfUpdateCoordinator
 from .disruptions import KEY_STATUS, STATUS_CANCELLED, transport_section
 from .helpers import get_train_num, parse_datetime
+from .tracking import journey_delay
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,10 +46,8 @@ async def async_setup_entry(
     """Set up the SNCF calendar."""
     coordinator: SncfUpdateCoordinator = entry.runtime_data
 
-    async_add_entities(
-        [SNCFCalendar(coordinator)],
-        update_before_add=True,
-    )
+    # Pas de update_before_add : le premier rafraîchissement est déjà fait.
+    async_add_entities([SNCFCalendar(coordinator)])
 
 
 @dataclass
@@ -90,6 +90,8 @@ class SNCFCalendar(
             "entry_type": DeviceEntryType.SERVICE,
         }
 
+        self._update_from_data()
+
     @property
     def event(self) -> MyCalendarEvent | None:
         """Return the current or next upcoming event."""
@@ -101,29 +103,29 @@ class SNCFCalendar(
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        events = self._fetch_journeys()
-
-        if events:
-            now = datetime.now()
-
-            self._event = min(
-                events,
-                key=lambda event: abs(event.start.replace(tzinfo=None) - now),
-            )
-
-            if self._event:
-                self._attr_extra_state_attributes = {
-                    "has_delay": self._event.has_delay,
-                    "delay": self._event.delay,
-                    "departure": self._event.departure_date_time,
-                    "arrival": self._event.arrival_date_time,
-                    "number": self._event.train_num,
-                }
-        else:
-            self._event = None
-            self._attr_extra_state_attributes = {}
-
+        self._update_from_data()
         self.async_write_ha_state()
+
+    def _update_from_data(self) -> None:
+        """Pick the event shown as the calendar state."""
+        now = dt_util.now()
+        # Train en cours de départ ou prochain train : jamais un train parti.
+        self._event = min(
+            (event for event in self._fetch_journeys() if event.end > now),
+            key=lambda event: event.start,
+            default=None,
+        )
+
+        if self._event:
+            self._attr_extra_state_attributes = {
+                "has_delay": self._event.has_delay,
+                "delay": self._event.delay,
+                "departure": self._event.departure_date_time,
+                "arrival": self._event.arrival_date_time,
+                "number": self._event.train_num,
+            }
+        else:
+            self._attr_extra_state_attributes = {}
 
     async def async_get_events(
         self,
@@ -144,17 +146,9 @@ class SNCFCalendar(
         arr_name: str,
     ) -> tuple[bool, int, str]:
         """Calculate the delay for a journey."""
-        arr_dt = parse_datetime(journey.get("arrival_date_time", ""))
-
-        section = transport_section(journey)
-
-        base_arr_dt = parse_datetime(section.get("base_arrival_date_time", ""))
-
-        delay = (
-            int((arr_dt - base_arr_dt).total_seconds() / 60)
-            if arr_dt and base_arr_dt
-            else 0
-        )
+        # Même retard que les capteurs « Train N » : le plus grand du départ
+        # et de l'arrivée.
+        delay = journey_delay(journey)
 
         summary = (
             f"{dep_name} → {arr_name} - RETARD ({delay}min)"

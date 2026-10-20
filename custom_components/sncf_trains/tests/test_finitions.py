@@ -102,6 +102,71 @@ def test_late_arrival_only():
     assert journey_delay(journey) == 10
 
 
+def _trip_coordinator(journey):
+    subentry = MagicMock()
+    subentry.subentry_id = "sub"
+    subentry.data = {
+        CONF_FROM: "stop_area:a",
+        CONF_TO: "stop_area:b",
+        CONF_DEPARTURE_NAME: "A",
+        CONF_ARRIVAL_NAME: "B",
+    }
+    coordinator = MagicMock()
+    coordinator.entry.entry_id = "entry"
+    coordinator.entry.subentries = {"sub": subentry}
+    coordinator.data = {"sub": [journey]}
+    return coordinator
+
+
+def test_line_sensor_and_calendar_report_departure_delay_like_train_sensor():
+    """Leaves 10 min late, arrives on time: delayed by 10 min everywhere."""
+    from custom_components.sncf_trains.calendar import SNCFCalendar
+    from custom_components.sncf_trains.sensor import (
+        SncfAllTrainsLineSensor,
+        SncfTrainSensor,
+    )
+
+    journey = _journey(
+        "20301014T075700", "20301014T074700", "20301014T082900", "20301014T082900"
+    )
+    coordinator = _trip_coordinator(journey)
+
+    train = SncfTrainSensor(coordinator, "sub", 0).extra_state_attributes
+    line = SncfAllTrainsLineSensor(coordinator, "sub").extra_state_attributes
+    event = SNCFCalendar(coordinator).event
+
+    assert (train["status"], train["delay_minutes"]) == ("delayed", 10)
+    assert (line["status"], line["delay_minutes"], line["has_delay"]) == (
+        "delayed",
+        "10",
+        True,
+    )
+    assert (event.has_delay, event.delay) == (True, 10)
+    assert event.summary == "A → B - RETARD (10min)"
+
+
+def test_train_sensor_names_its_stations():
+    """The cards read the stations here, not in the (renamable) device name."""
+    from custom_components.sncf_trains.sensor import SncfTrainSensor
+
+    journey = _journey(
+        "20301014T074700", "20301014T074700", "20301014T082900", "20301014T082900"
+    )
+    coordinator = _trip_coordinator(journey)
+    coordinator.entry.subentries["sub"].data[CONF_DEPARTURE_NAME] = (
+        "L'Isle-Jourdain (L'Isle-Jourdain)"
+    )
+    coordinator.entry.subentries["sub"].data[CONF_ARRIVAL_NAME] = (
+        "Saint-Agne (Toulouse)"
+    )
+
+    train = SncfTrainSensor(coordinator, "sub", 0).extra_state_attributes
+
+    # Mêmes noms que l'appareil « SNCF L'Isle-Jourdain → Saint-Agne (Toulouse) ».
+    assert train["departure_name"] == "L'Isle-Jourdain"
+    assert train["arrival_name"] == "Saint-Agne (Toulouse)"
+
+
 # --- #10 --------------------------------------------------------------------
 
 

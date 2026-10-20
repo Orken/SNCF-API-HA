@@ -6,12 +6,26 @@ Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), b
 
 ### Nouveautés
 - **Clé API refusée** : Home Assistant propose de saisir une nouvelle clé, vérifiée avant d'être enregistrée. Auparavant, les entités restaient indisponibles jusqu'à une reconfiguration manuelle ou un redémarrage.
+- Attributs `departure_name` et `arrival_name` sur les capteurs « Train N » (noms des gares).
 
 ### Corrections
 - **Dernier train en retard** : avec une heure de fin, un train prévu avant cette heure mais parti en retard reste affiché jusqu'à son départ réel, au lieu de céder la place aux trains du lendemain.
 - **Trajets avec correspondance** : seuls les trains directs sont demandés à l'API. Les correspondances ne réduisent plus le nombre de trains affichés (capteurs « Train 8 » à « Train 10 » vides, plage terminée trop tôt).
 - **Événement `sncf_trains_status_changed` répété toutes les 2 minutes** quand deux trajets partant de la même gare prennent le même train : le statut de chaque train est désormais suivi par trajet. Le `train_uid` des événements ne change pas.
 - **Intervalles de mise à jour** : les options refusent une valeur inférieure à 1 minute. Avec 0, l'API était interrogée en continu et le quota journalier épuisé en quelques minutes.
+- **Train très en retard annoncé supprimé** : un train dépassé par le suivant disparaît du temps réel. Avec une perturbation « retard important », il est désormais affiché en retard, avec ses horaires corrigés quand la SNCF les donne.
+- **Train supprimé un autre jour** : une perturbation trouvée par numéro de train ne s'applique plus qu'à ses dates. La suppression du train de demain ne marque plus celui d'aujourd'hui comme supprimé.
+- **Calendrier** : son état montre le train qui part ou le prochain, et non le plus proche dans le temps (souvent déjà parti, avec un décalage d'une à deux heures dû au fuseau horaire). Plus d'événement une fois tous les trains partis.
+- **Retard du capteur « Tous les trains » et du calendrier** : même calcul que les capteurs « Train N », le plus grand du retard au départ et à l'arrivée. Un train parti en retard puis arrivé à l'heure n'y était pas signalé.
+- **Reconfiguration d'un trajet** : changer la plage horaire met à jour l'identifiant du trajet. L'ancienne plage peut de nouveau être ajoutée, et la nouvelle ne peut plus l'être en double.
+- **Démarrage** : un seul appel à l'API par trajet au lieu de trois (les entités ne redemandent plus de rafraîchissement à leur création).
+- **Ressource Lovelace avec Home Assistant 2026.1 et avant** : la ressource des cartes est de nouveau créée et mise à jour automatiquement en mode stockage.
+- **Diagnostics** : téléchargeables même quand l'installation a échoué (API injoignable au démarrage).
+- **Cartes : jour du départ** : un train dans plusieurs jours affiche sa date (« 19/10 ») et un train parti la veille « hier », au lieu de « demain ».
+- **Cartes : appareil renommé** : la destination du tableau des départs n'est plus vide et la gare de départ n'est plus remplacée par le nom de l'appareil.
+
+### Technique
+- Tests des cartes Lovelace (`node --test tests/cards.test.mjs`), lancés par la CI.
 
 ## 2.0.0
 

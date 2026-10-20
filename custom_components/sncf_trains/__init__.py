@@ -90,7 +90,9 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, card_url: str) 
     A resource left by the former card is reused and pointed at the new file.
     """
     lovelace = hass.data.get("lovelace")
-    if lovelace is None or getattr(lovelace, "resource_mode", None) != "storage":
+    # « mode » jusqu'à Home Assistant 2026.1, « resource_mode » ensuite.
+    mode = getattr(lovelace, "resource_mode", None) or getattr(lovelace, "mode", None)
+    if lovelace is None or mode != "storage":
         return
     resources = lovelace.resources
     if not resources.loaded:
