@@ -2,7 +2,7 @@
 
 Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), basé sur la 1.3.3.
 
-## Non publié
+## 2.1.0
 
 ### Nouveautés
 - **Clé API refusée** : Home Assistant propose de saisir une nouvelle clé, vérifiée avant d'être enregistrée. Auparavant, les entités restaient indisponibles jusqu'à une reconfiguration manuelle ou un redémarrage.
