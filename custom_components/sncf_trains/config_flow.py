@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Any
 import asyncio
 from aiohttp import ClientError
@@ -111,6 +112,28 @@ class SncfTrainsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
 
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]):
+        """Handle an API key rejected by the API (HTTP 401)."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
+        """Ask for a new API key."""
+        errors = {}
+        if user_input is not None:
+            session = async_get_clientsession(self.hass)
+            api = SncfApiClient(session, user_input[CONF_API_KEY])
+            if await self._validate_api_key(api):
+                return self.async_update_reload_and_abort(
+                    self._get_reauth_entry(), data_updates=user_input
+                )
+            errors["base"] = "invalid_api_key"
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_API_KEY): str}),
+            errors=errors,
+        )
+
     async def _validate_api_key(self, api: SncfApiClient):
         """Check API Key."""
         try:
@@ -148,6 +171,10 @@ class SncfTrainsOptionsFlowHandler(OptionsFlow):
 
         entry = self.config_entry
 
+        # Au moins une minute : 0 interrogerait l'API en continu et
+        # épuiserait le quota journalier en quelques minutes.
+        interval = vol.All(int, vol.Range(min=1))
+
         DATA_SCHEMA = vol.Schema(
             {
                 vol.Required(
@@ -155,13 +182,13 @@ class SncfTrainsOptionsFlowHandler(OptionsFlow):
                     default=entry.options.get(
                         CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
                     ),
-                ): int,
+                ): interval,
                 vol.Required(
                     CONF_OUTSIDE_INTERVAL,
                     default=entry.options.get(
                         CONF_OUTSIDE_INTERVAL, DEFAULT_OUTSIDE_INTERVAL
                     ),
-                ): int,
+                ): interval,
             }
         )
 

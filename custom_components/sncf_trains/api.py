@@ -107,6 +107,9 @@ class SncfApiClient:
         omitted by the API) or ``base_schedule`` (planned timetable).
         The response disruptions are attached to each journey under
         ``sncf_disruptions``.
+
+        Only direct trains are requested: journeys with a change are not
+        shown and would otherwise take up part of ``count``.
         """
         url = f"{API_BASE}/v1/coverage/sncf/journeys"
         params_raw: dict[str, object] = {
@@ -116,6 +119,7 @@ class SncfApiClient:
             "count": count,
             "data_freshness": data_freshness,
             "datetime_represents": "departure",
+            "max_nb_transfers": 0,
         }
         params: Mapping[str, str] = {k: str(v) for k, v in params_raw.items()}
 

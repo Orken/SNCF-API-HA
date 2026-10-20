@@ -334,3 +334,50 @@ async def test_end_time_and_count_end_time_wins(hass):
     assert _departures(data) == ["20261014T061000"]
     start, end = coordinator._windows["trip"]
     assert end.replace(tzinfo=None) == datetime(2026, 10, 14, 6, 30)
+
+
+def _late_api() -> AsyncMock:
+    """Trains planned at 07:10 and 07:55; the 07:55 leaves 20 minutes late."""
+
+    async def fetch(_from, _to, datetime_str, count=5, data_freshness="realtime"):
+        if data_freshness != "realtime":
+            return []
+        day = datetime.strptime(datetime_str[:8], "%Y%m%d")
+        on_time = _journey(day.replace(hour=7, minute=10))
+        late = _journey(day.replace(hour=7, minute=55))
+        late["departure_date_time"] = day.replace(hour=8, minute=15).strftime(
+            "%Y%m%dT%H%M%S"
+        )
+        return [on_time, late]
+
+    api = AsyncMock()
+    api.fetch_journeys = AsyncMock(side_effect=fetch)
+    return api
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("train_count", [2, 5])
+async def test_end_time_window_stays_open_until_late_last_train_leaves(
+    hass, train_count
+):
+    # 07:00-08:00 window. At 08:02 the 07:55 train has not left yet (08:15):
+    # it stays displayed instead of jumping to tomorrow's window.
+    coordinator = _coordinator(
+        hass, time_start="07:00", time_end="08:00", train_count=train_count
+    )
+    coordinator.api_client = _late_api()
+    await _update(coordinator, 2026, 10, 14, 7, 50)
+
+    coordinator.api_client = _late_api()
+    data = await _update(coordinator, 2026, 10, 14, 8, 2)
+
+    assert _requested(coordinator.api_client) == ["20261014T070000"]
+    assert _departures(data) == ["20261014T071000", "20261014T081500"]
+    assert coordinator.update_interval == timedelta(minutes=2)
+
+    # Once it has left, the next window is tomorrow's.
+    coordinator.api_client = _late_api()
+    data = await _update(coordinator, 2026, 10, 14, 8, 16)
+
+    assert _requested(coordinator.api_client) == ["20261015T070000"]
+    assert _departures(data) == ["20261015T071000", "20261015T081500"]

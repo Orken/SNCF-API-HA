@@ -86,6 +86,32 @@ async def test_quota_error_is_a_runtime_error():
     assert issubclass(SncfQuotaError, RuntimeError)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data_freshness", ["realtime", "base_schedule"])
+async def test_journeys_request_asks_for_direct_trains_only(data_freshness):
+    """Journeys with a change are dropped: they must not use up the count.
+
+    Otherwise 10 journeys with 3 changes leave only 7 direct trains, and the
+    range ends at the 7th train instead of the 10th.
+    """
+    session = MagicMock()
+    session.get = MagicMock(return_value=_Resp(200, {"journeys": []}))
+    client = SncfApiClient(session, "key")
+
+    await client.fetch_journeys(
+        "stop_area:a",
+        "stop_area:b",
+        "20261014T073000",
+        count=10,
+        data_freshness=data_freshness,
+    )
+
+    params = session.get.call_args.kwargs["params"]
+    assert params["max_nb_transfers"] == "0"
+    assert params["count"] == "10"
+    assert params["data_freshness"] == data_freshness
+
+
 # --- Coordinator repairs ------------------------------------------------------
 
 

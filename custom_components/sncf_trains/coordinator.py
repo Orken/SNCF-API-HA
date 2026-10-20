@@ -61,8 +61,9 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self.api_client = None
 
-        # Dernier statut connu de chaque train (clé : train_uid), persisté
-        # pour ne pas ré-annoncer les mêmes changements après un redémarrage.
+        # Dernier statut connu de chaque train, par trajet (clé :
+        # tracking.state_key), persisté pour ne pas ré-annoncer les mêmes
+        # changements après un redémarrage.
         self.train_states: dict[str, dict[str, Any]] = {}
         self._store: Store | None = None
 
@@ -186,10 +187,14 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         """Fin de plage : la première limite atteinte.
 
         La plage se termine au départ du dernier des `train_count` trains
-        affichés, sans dépasser l'heure de fin si elle est renseignée.
-        Sans heure de fin et avec moins de trains que demandé, elle se
-        termine au départ du dernier train (ou tout de suite s'il n'y en a
-        aucun).
+        affichés, ou à l'heure de fin si elle est renseignée et atteinte
+        avant. Sans heure de fin et avec moins de trains que demandé, elle
+        se termine au départ du dernier train (ou tout de suite s'il n'y en
+        a aucun).
+
+        Les trains affichés partent tous avant l'heure de fin (départ
+        prévu) : un train en retard garde la plage ouverte jusqu'à son
+        départ réel, même au-delà de l'heure de fin.
         """
         departures = [
             dep
@@ -203,9 +208,11 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         last = max(departures, default=None)
 
         if fixed_end is not None:
-            if last is None or len(journeys) < train_count:
+            if last is None:
                 return fixed_end
-            return min(last, fixed_end)
+            if len(journeys) < train_count:
+                return max(last, fixed_end)
+            return last
 
         return last if last is not None else start
 

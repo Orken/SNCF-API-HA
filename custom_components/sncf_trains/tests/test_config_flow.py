@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -460,3 +461,99 @@ async def test_options_flow(hass):
         "update_interval": 5,
         "outside_interval": 30,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["update_interval", "outside_interval"])
+@pytest.mark.parametrize("value", [0, -5])
+async def test_options_flow_rejects_interval_below_one_minute(hass, field, value):
+    """An interval of 0 would poll the API about every second."""
+    entry = MockConfigEntry(
+        version=1,
+        minor_version=2,
+        domain=DOMAIN,
+        title="Trains SNCF",
+        data={CONF_API_KEY: "valid_key"},
+        options={},
+        source=config_entries.SOURCE_USER,
+        unique_id="sncf_trains",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    with pytest.raises(vol.Invalid):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"update_interval": 2, "outside_interval": 60, field: value},
+        )
+    assert entry.options == {}
+
+
+def _api_key_entry(hass) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        version=1,
+        minor_version=2,
+        domain=DOMAIN,
+        title="Trains SNCF",
+        data={CONF_API_KEY: "expired_key"},
+        source=config_entries.SOURCE_USER,
+        unique_id="sncf_trains",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+@pytest.mark.asyncio
+async def test_reauth_flow_replaces_rejected_api_key(hass):
+    """A 401 starts a reauth flow: the user enters a new key, kept on success."""
+    entry = _api_key_entry(hass)
+    mock_api = AsyncMock()
+    mock_api.search_stations = AsyncMock(
+        return_value=[{"id": "stop_area:dep", "name": "Paris Gare de Lyon"}]
+    )
+
+    with (
+        patch(
+            "custom_components.sncf_trains.config_flow.SncfApiClient",
+            return_value=mock_api,
+        ) as client,
+        patch("custom_components.sncf_trains.async_setup_entry", return_value=True),
+    ):
+        result = await entry.start_reauth_flow(hass)
+
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "reauth_confirm"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_API_KEY: "new_key"},
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data == {CONF_API_KEY: "new_key"}
+    assert client.call_args.args[1] == "new_key"
+
+
+@pytest.mark.asyncio
+async def test_reauth_flow_rejects_invalid_api_key(hass):
+    entry = _api_key_entry(hass)
+    mock_api = AsyncMock()
+    mock_api.search_stations = AsyncMock(return_value=None)
+
+    with patch(
+        "custom_components.sncf_trains.config_flow.SncfApiClient",
+        return_value=mock_api,
+    ):
+        result = await entry.start_reauth_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_API_KEY: "still_bad"},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "invalid_api_key"}
+    assert entry.data == {CONF_API_KEY: "expired_key"}

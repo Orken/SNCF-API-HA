@@ -8,13 +8,21 @@
         "data": {
           "api_key": "Clé API"
         }
+      },
+      "reauth_confirm": {
+        "title": "Clé API SNCF refusée",
+        "description": "L'API SNCF n'accepte plus votre clé API. Saisissez une clé valide pour reprendre les mises à jour.",
+        "data": {
+          "api_key": "Clé API"
+        }
       }
     },
     "error": {
       "invalid_api_key": "Clé API invalide. Veuillez vérifier et réessayer."
     },
     "abort": {
-      "reconfigure_successful": "Intégration reconfigurée avec succès"
+      "reconfigure_successful": "Intégration reconfigurée avec succès",
+      "reauth_successful": "Clé API mise à jour"
     }
   },
   "options": {

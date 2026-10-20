@@ -8,13 +8,21 @@
         "data": {
           "api_key": "API key"
         }
+      },
+      "reauth_confirm": {
+        "title": "SNCF API key rejected",
+        "description": "The SNCF API no longer accepts your API key. Enter a valid key to resume updates.",
+        "data": {
+          "api_key": "API key"
+        }
       }
     },
     "error": {
       "invalid_api_key": "API Key not found. Please retry."
     },
     "abort": {
-      "reconfigure_successful": "Reconfiguration successful"
+      "reconfigure_successful": "Reconfiguration successful",
+      "reauth_successful": "API key updated"
     }
   },
   "options": {

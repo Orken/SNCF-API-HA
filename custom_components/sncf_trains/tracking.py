@@ -37,6 +37,15 @@ def journey_uid(journey: dict[str, Any]) -> str | None:
     return f"{key[0]}_{key[1]}" if key else None
 
 
+def state_key(trip_id: str, uid: str) -> str:
+    """Key of a train's saved status: one per trip.
+
+    Two trips from the same station can use the same train, with a
+    different delay or destination status for each of them.
+    """
+    return f"{trip_id}/{uid}"
+
+
 def _pt_section(journey: dict[str, Any]) -> dict[str, Any]:
     for candidate in journey.get("sections") or []:
         if isinstance(candidate, dict) and candidate.get("type") == "public_transport":
@@ -86,8 +95,9 @@ def detect_changes(
     * an event is emitted when a train is first seen with a non on-time
       status, when its status changes, or when its delay changes while it
       is delayed;
-    * ``new_state`` maps ``train_uid`` to its last status, keeping trains
-      no longer returned by the API until ``RETENTION`` after departure.
+    * ``new_state`` maps ``state_key(trip, train_uid)`` to its last status,
+      keeping trains no longer returned by the API until ``RETENTION``
+      after departure.
     """
     events: list[dict[str, Any]] = []
     state: dict[str, dict[str, Any]] = {}
@@ -109,10 +119,12 @@ def detect_changes(
             if uid is None or dep is None:
                 continue
 
+            key = state_key(trip_id, uid)
             delay = journey_delay(journey)
             status = journey_status(journey, delay)
             served = not journey.get(KEY_DESTINATION_DELETED, False)
-            before = previous.get(uid)
+            # Versions up to 2.0.0 saved the state under train_uid alone.
+            before = previous.get(key) or previous.get(uid)
 
             changed = (
                 (before is None and (status != STATUS_ON_TIME or not served))
@@ -140,7 +152,7 @@ def detect_changes(
                 "arrival_delay_minutes": journey_arrival_delay(journey),
                 "destination_served": served,
             }
-            state[uid] = record
+            state[key] = record
 
             if changed:
                 dep_rt = parse_datetime(journey.get("departure_date_time", ""))

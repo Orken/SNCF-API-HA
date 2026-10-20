@@ -74,7 +74,7 @@ def test_first_sighting_on_time_is_silent():
     )
 
     assert events == []
-    assert state["870302_20261014T0747"]["status"] == "on_time"
+    assert state["trip/870302_20261014T0747"]["status"] == "on_time"
 
 
 def test_first_sighting_cancelled_emits_event_with_details():
@@ -145,6 +145,47 @@ def test_old_trains_are_forgotten_recent_missing_ones_are_kept():
     _, state = detect_changes(previous, {}, INFO, NOW)
 
     assert set(state) == {"recent_20261013T1900"}
+
+
+def test_same_train_on_two_trips_is_tracked_per_trip():
+    """A->B and A->C use the same train, with a different delay at each end."""
+    journeys = {
+        "to_b": [_journey("860001", "20261014T074700", delay=5)],
+        "to_c": [_journey("860001", "20261014T074700", delay=12)],
+    }
+    info = {"to_b": {"trip_title": "A → B"}, "to_c": {"trip_title": "A → C"}}
+
+    events, state = detect_changes({}, journeys, info, NOW)
+    assert sorted((e["trip_title"], e["delay_minutes"]) for e in events) == [
+        ("A → B", 5),
+        ("A → C", 12),
+    ]
+
+    # Same data again: nothing, for either trip.
+    events, _ = detect_changes(state, journeys, info, NOW)
+    assert events == []
+
+
+def test_state_saved_by_version_2_0_is_still_used():
+    """Earlier versions keyed the saved state by train_uid alone."""
+    previous = {
+        "870302_20261014T0747": {
+            "trip_id": "trip",
+            "train_uid": "870302_20261014T0747",
+            "train_num": "870302",
+            "planned_departure": "2026-10-14T07:47:00+02:00",
+            "status": "delayed",
+            "delay_minutes": 7,
+            "departure_delay_minutes": 7,
+            "arrival_delay_minutes": 7,
+            "destination_served": True,
+        }
+    }
+    journeys = {"trip": [_journey("870302", "20261014T074700", delay=7)]}
+
+    events, _ = detect_changes(previous, journeys, INFO, NOW)
+
+    assert events == []
 
 
 @pytest.mark.asyncio

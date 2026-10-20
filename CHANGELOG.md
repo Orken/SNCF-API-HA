@@ -2,6 +2,17 @@
 
 Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), basé sur la 1.3.3.
 
+## Non publié
+
+### Nouveautés
+- **Clé API refusée** : Home Assistant propose de saisir une nouvelle clé, vérifiée avant d'être enregistrée. Auparavant, les entités restaient indisponibles jusqu'à une reconfiguration manuelle ou un redémarrage.
+
+### Corrections
+- **Dernier train en retard** : avec une heure de fin, un train prévu avant cette heure mais parti en retard reste affiché jusqu'à son départ réel, au lieu de céder la place aux trains du lendemain.
+- **Trajets avec correspondance** : seuls les trains directs sont demandés à l'API. Les correspondances ne réduisent plus le nombre de trains affichés (capteurs « Train 8 » à « Train 10 » vides, plage terminée trop tôt).
+- **Événement `sncf_trains_status_changed` répété toutes les 2 minutes** quand deux trajets partant de la même gare prennent le même train : le statut de chaque train est désormais suivi par trajet. Le `train_uid` des événements ne change pas.
+- **Intervalles de mise à jour** : les options refusent une valeur inférieure à 1 minute. Avec 0, l'API était interrogée en continu et le quota journalier épuisé en quelques minutes.
+
 ## 2.0.0
 
 ### Nouveautés
