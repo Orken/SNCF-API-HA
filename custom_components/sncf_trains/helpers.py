@@ -168,3 +168,15 @@ def time_range_id(data: dict[str, Any]) -> str:
 def trip_title(dep_name: str, arr_name: str, data: dict[str, Any]) -> str:
     """Titre d'un trajet."""
     return f"Trajet: {dep_name} → {arr_name} ({time_range_label(data)})"
+
+
+def station_code(station_id: str) -> str:
+    """UIC code of a station id, without the "OCE" prefix used by some ids.
+
+    "stop_area:SNCF:87611301" -> "87611301"
+    "stop_area:OCE:SA:87611301" -> "87611301"
+    """
+    code = str(station_id or "").rsplit(":", 1)[-1]
+    if code.upper().startswith("OCE"):
+        code = code[3:]
+    return code if code.isdigit() else ""

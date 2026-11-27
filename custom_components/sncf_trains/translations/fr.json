@@ -109,7 +109,7 @@
   "issues": {
     "invalid_journey": {
       "title": "Trajet SNCF invalide : {title}",
-      "description": "L'API SNCF refuse ce trajet : « {reason} ».\n\nCe trajet ne pourra jamais renvoyer de train tel qu'il est configuré (gare inconnue, date hors des horaires publiés…). Supprimez-le puis recréez-le en choisissant bien une **gare** de départ et d'arrivée dans Paramètres → Appareils et services → SNCF Trains."
+      "description": "L'API SNCF refuse ce trajet : « {reason} ».\n\nUne gare peut être absente des horaires pendant des travaux ou une fermeture de ligne : ce message disparaît alors tout seul quand elle est de nouveau desservie. Sinon (gare inconnue, date hors des horaires publiés…), supprimez le trajet puis recréez-le en choisissant bien une **gare** de départ et d'arrivée dans Paramètres → Appareils et services → SNCF Trains."
     },
     "api_unavailable": {
       "title": "API SNCF injoignable",

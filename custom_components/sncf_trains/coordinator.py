@@ -38,7 +38,7 @@ from .disruptions import (
     merge_with_schedule,
     planned_departure,
 )
-from .helpers import parse_datetime, short_station_name
+from .helpers import parse_datetime, short_station_name, station_code
 from .tracking import EVENT_STATUS_CHANGED, detect_changes
 
 _LOGGER = logging.getLogger(__name__)
@@ -359,6 +359,7 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         journeys = None
         last_error = ""
         invalid: SncfInvalidJourneyError | None = None
+        resolved = False
 
         # ---------------------------------------------------------
         # Appel API avec retry
@@ -376,6 +377,17 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
                     break
 
             except SncfInvalidJourneyError as err:
+                # Gare inconnue de l'API : son identifiant a pu changer
+                # (refonte du référentiel, travaux...). On la recherche
+                # de nouveau, une seule fois, avant d'abandonner.
+                if err.error_id == "unknown_object" and not resolved:
+                    resolved = True
+                    new_ids = await self._resolve_stations(
+                        subentry_id, entry, departure, arrival, err.message
+                    )
+                    if new_ids is not None:
+                        departure, arrival = new_ids
+                        continue
                 # Inutile de réessayer : le trajet lui-même est refusé.
                 invalid = err
                 break
@@ -600,6 +612,102 @@ class SncfUpdateCoordinator(DataUpdateCoordinator):
         self._track_changes(trains)
 
         return trains
+
+    async def _resolve_stations(
+        self,
+        subentry_id: str,
+        entry: Any,
+        departure: str,
+        arrival: str,
+        message: str,
+    ) -> tuple[str, str] | None:
+        """Nouveaux identifiants des gares refusées par l'API, ou None.
+
+        L'API répond « The entry point: <id> is not valid » quand elle ne
+        connaît plus une gare. On la recherche par son nom et on garde la
+        gare de même code UIC (ou, à défaut, de même nom). Les nouveaux
+        identifiants sont enregistrés dans le trajet.
+        """
+        stations = [
+            (departure, entry.data.get(CONF_DEPARTURE_NAME)),
+            (arrival, entry.data.get(CONF_ARRIVAL_NAME)),
+        ]
+        # Gare(s) citée(s) dans le message ; les deux si le message est muet.
+        rejected = [sid for sid, _ in stations if sid in (message or "")]
+        if not rejected:
+            rejected = [sid for sid, _ in stations]
+
+        new_ids = {departure: departure, arrival: arrival}
+        for station_id, name in stations:
+            if station_id not in rejected:
+                continue
+            new_id = await self._find_station(station_id, name)
+            if new_id:
+                new_ids[station_id] = new_id
+
+        departure_new, arrival_new = new_ids[departure], new_ids[arrival]
+        if (departure_new, arrival_new) == (departure, arrival):
+            return None
+
+        _LOGGER.warning(
+            "Trajet '%s' : identifiant de gare mis à jour (%s → %s, %s → %s)",
+            entry.title,
+            departure,
+            departure_new,
+            arrival,
+            arrival_new,
+        )
+        subentry = self.entry.subentries.get(subentry_id)
+        if subentry is not None:
+            try:
+                self.hass.config_entries.async_update_subentry(
+                    self.entry,
+                    subentry,
+                    data={
+                        **subentry.data,
+                        CONF_FROM: departure_new,
+                        CONF_TO: arrival_new,
+                    },
+                )
+            except Exception as err:  # noqa: BLE001 - l'appel en cours suffit
+                _LOGGER.debug("Trajet non enregistré : %s", err)
+        return departure_new, arrival_new
+
+    async def _find_station(self, station_id: str, name: str | None) -> str | None:
+        """Identifiant actuel d'une gare, cherchée par son nom."""
+        if not name:
+            return None
+        try:
+            places = await self.api_client.search_stations(short_station_name(name))
+        except ConfigEntryAuthFailed:
+            raise
+        except Exception as err:  # noqa: BLE001 - recherche « best effort »
+            _LOGGER.debug("Recherche de la gare '%s' impossible : %s", name, err)
+            return None
+        if not isinstance(places, list):
+            return None
+
+        candidates = [
+            str(place.get("id"))
+            for place in places
+            if isinstance(place, dict)
+            and place.get("id")
+            and place.get("id") != station_id
+        ]
+        code = station_code(station_id)
+        if code:
+            for candidate in candidates:
+                if station_code(candidate) == code:
+                    return candidate
+
+        wanted = short_station_name(name).casefold()
+        for place in places:
+            place_id = place.get("id") if isinstance(place, dict) else None
+            if place_id in candidates and (
+                short_station_name(str(place.get("name", ""))).casefold() == wanted
+            ):
+                return str(place_id)
+        return None
 
     def _raise_issue(
         self,
