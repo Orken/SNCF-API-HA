@@ -165,6 +165,41 @@ def test_other_deleted_stop_is_ignored():
     assert KEY_STATUS not in journey
 
 
+# New SNCF ids (2026): no UIC code any more.
+_AGNE = "stop_area:SNC:FR::LMO:7099a8b0-cb0a-11e8-8bfa-f784c1c7c611:"
+_AGNE_UUID_POINT = "stop_point:SNC:FR::LMO:7099a8b0-cb0a-11e8-8bfa-f784c1c7c611:Train"
+
+
+def test_deleted_destination_stop_with_new_station_ids():
+    """The stop point shares the station's UUID."""
+    journey = _journey()
+    attach_disruptions([journey], [_disruption_deleting(_AGNE_UUID_POINT)])
+
+    mark_destination_deleted([journey], _AGNE)
+
+    assert journey[KEY_DESTINATION_DELETED] is True
+
+
+def test_deleted_destination_stop_found_by_the_journey_stop_point():
+    """The stop point id shares nothing with the station id."""
+    journey = _journey(to={"id": "sp:42", "stop_point": {"id": "sp:42"}})
+    attach_disruptions([journey], [_disruption_deleting("sp:42")])
+
+    mark_destination_deleted([journey], _AGNE)
+
+    assert journey[KEY_DESTINATION_DELETED] is True
+
+
+def test_other_deleted_stop_is_ignored_with_new_station_ids():
+    journey = _journey(to={"id": "sp:42", "stop_point": {"id": "sp:42"}})
+    other = "stop_point:SNC:FR::LMU:68ce1d50-cb0a-11e8-8bfa-f784c1c7c611:Train"
+    attach_disruptions([journey], [_disruption_deleting(other)])
+
+    mark_destination_deleted([journey], _AGNE)
+
+    assert KEY_DESTINATION_DELETED not in journey
+
+
 # --- cause ------------------------------------------------------------------
 
 

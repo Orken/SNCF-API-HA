@@ -110,7 +110,7 @@ def _simplify_disruption(disruption: dict[str, Any]) -> dict[str, Any]:
                 break
 
     # Stops removed from the train's route (partial cancellation), and
-    # amended times per stop (UIC code -> HHMMSS): the only times known for
+    # amended times per stop (stop key -> HHMMSS): the only times known for
     # a late train the realtime planner dropped because another overtook it.
     deleted_stops: list[str] = []
     amended_times: dict[str, dict[str, str]] = {}
@@ -120,14 +120,14 @@ def _simplify_disruption(disruption: dict[str, Any]) -> dict[str, Any]:
                 continue
             point = stop.get("stop_point") or {}
             area = point.get("stop_area") or {}
-            code = _stop_code(str(point.get("id") or area.get("id") or ""))
             times = {
                 kind: str(stop[f"amended_{kind}_time"])
                 for kind in ("departure", "arrival")
                 if stop.get(f"amended_{kind}_time")
             }
-            if code and times:
-                amended_times[code] = times
+            if times:
+                for key in _stop_keys(point.get("id"), area.get("id")):
+                    amended_times[key] = times
             if "deleted" not in (
                 stop.get("stop_time_effect"),
                 stop.get("departure_status"),
@@ -299,8 +299,15 @@ def _apply_amended_times(
     for dis in journey.get(KEY_DISRUPTIONS) or []:
         for code, times in (dis.get("amended_times") or {}).items():
             amended.setdefault(code, {}).update(times)
-    departure = amended.get(_stop_code(departure_id or ""), {}).get("departure")
-    arrival = amended.get(_stop_code(arrival_id or ""), {}).get("arrival")
+
+    def amended_time(side: str, station_id: str | None, kind: str) -> str | None:
+        for key in _endpoint_keys(journey, side, station_id):
+            if amended.get(key, {}).get(kind):
+                return amended[key][kind]
+        return None
+
+    departure = amended_time("from", departure_id, "departure")
+    arrival = amended_time("to", arrival_id, "arrival")
     if not (departure or arrival):
         return
 
@@ -423,21 +430,54 @@ def merge_with_schedule(
     return merged
 
 
-def _stop_code(stop_id: str) -> str:
-    """UIC code of a stop ("stop_area:SNCF:87611301" -> "87611301")."""
-    codes = re.findall(r"\d{7,}", stop_id or "")
-    return codes[0] if codes else (stop_id or "")
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
+
+def _stop_keys(*stop_ids: Any) -> list[str]:
+    """Keys identifying a station, whatever the id format.
+
+    The whole id, plus the part shared by a station and its stop points:
+    the UIC code of historical ids ("stop_area:SNCF:87611301" ->
+    "87611301") or the UUID of the newer ones
+    ("stop_area:SNC:FR::LMO:7099a8b0-...:" -> "7099a8b0-...").
+    """
+    keys: list[str] = []
+    for stop_id in stop_ids:
+        text = str(stop_id or "")
+        if not text:
+            continue
+        for key in (text, *re.findall(r"\d{7,}", text), *re.findall(_UUID, text)):
+            if key not in keys:
+                keys.append(key)
+    return keys
+
+
+def _endpoint_keys(
+    journey: dict[str, Any], side: str, station_id: str | None
+) -> list[str]:
+    """Keys of the departure ("from") or arrival ("to") station of a journey.
+
+    The configured station id, plus the stop point the train really uses
+    there: disruptions name stop points, whose ids may share nothing with
+    the id of their station.
+    """
+    place = transport_section(journey).get(side)
+    place = place if isinstance(place, dict) else {}
+    point = place.get("stop_point")
+    point = point if isinstance(point, dict) else {}
+    area = point.get("stop_area")
+    area = area if isinstance(area, dict) else {}
+    return _stop_keys(station_id, point.get("id"), place.get("id"), area.get("id"))
 
 
 def destination_deleted(journey: dict[str, Any], arrival_id: str | None) -> bool:
     """True if a disruption removed the stop at the arrival station."""
-    code = _stop_code(arrival_id or "")
-    if not code:
-        return False
+    keys = _endpoint_keys(journey, "to", arrival_id)
     return any(
-        code in stop
+        key in stop
         for dis in journey.get(KEY_DISRUPTIONS) or []
         for stop in dis.get("deleted_stops") or []
+        for key in keys
     )
 
 
