@@ -14,6 +14,8 @@ from custom_components.sncf_trains.api import (
 )
 from custom_components.sncf_trains.const import (
     CONF_API_KEY,
+    CONF_ARRIVAL_NAME,
+    CONF_DEPARTURE_NAME,
     CONF_FROM,
     CONF_TIME_END,
     CONF_TIME_START,
@@ -221,3 +223,77 @@ async def test_quota_repair_uses_quota_text(hass):
 
     issue = ir.async_get(hass).async_get_issue(DOMAIN, "api_unavailable")
     assert issue.translation_key == "quota_exceeded"
+
+
+# --- Station id changed -------------------------------------------------------
+
+
+def _coordinator_with_names(hass) -> SncfUpdateCoordinator:
+    coordinator = _coordinator(hass)
+    subentry = coordinator.entry.subentries["sub"]
+    subentry.data = {
+        **subentry.data,
+        CONF_FROM: "stop_area:SNCF:87611004",
+        CONF_TO: "stop_area:SNCF:87611301",
+        CONF_DEPARTURE_NAME: "Toulouse Matabiau (Toulouse)",
+        CONF_ARRIVAL_NAME: "L'Isle-Jourdain (L'Isle-Jourdain)",
+    }
+    return coordinator
+
+
+@pytest.mark.asyncio
+async def test_unknown_station_is_searched_again_and_saved(hass):
+    """'The entry point: <id> is not valid': the station id changed."""
+    coordinator = _coordinator_with_names(hass)
+    good = [{"id": "journey_1", "nb_transfers": 0}]
+    rejected = SncfInvalidJourneyError(
+        "unknown_object", "The entry point: stop_area:SNCF:87611301 is not valid"
+    )
+    coordinator.api_client.fetch_journeys = AsyncMock(
+        side_effect=[rejected, good, good]
+    )
+    coordinator.api_client.search_stations = AsyncMock(
+        return_value=[
+            {"id": "stop_area:SNCF:87611999", "name": "L'Isle-Jourdain (Gers)"},
+            {"id": "stop_area:OCE:SA:87611301", "name": "Autre nom"},
+        ]
+    )
+    update = MagicMock()
+    with (
+        _now(),
+        patch.object(hass.config_entries, "async_update_subentry", update),
+        patch("custom_components.sncf_trains.coordinator.asyncio.sleep"),
+    ):
+        data = await coordinator._async_update_data()
+
+    assert data == {"sub": good}
+    # Only the rejected station is searched, by its short name.
+    coordinator.api_client.search_stations.assert_awaited_once_with(
+        "L'Isle-Jourdain"
+    )
+    # Same UIC code wins over a different station.
+    retry = coordinator.api_client.fetch_journeys.await_args_list[1]
+    assert retry.args[:2] == ("stop_area:SNCF:87611004", "stop_area:OCE:SA:87611301")
+    saved = update.call_args.kwargs["data"]
+    assert saved[CONF_TO] == "stop_area:OCE:SA:87611301"
+    assert saved[CONF_FROM] == "stop_area:SNCF:87611004"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "invalid_journey_sub") is None
+
+
+@pytest.mark.asyncio
+async def test_unknown_station_not_found_raises_repair_once(hass):
+    coordinator = _coordinator_with_names(hass)
+    rejected = SncfInvalidJourneyError(
+        "unknown_object", "The entry point: stop_area:SNCF:87611301 is not valid"
+    )
+    coordinator.api_client.fetch_journeys = AsyncMock(side_effect=rejected)
+    # Only the same, rejected id comes back: nothing better to try.
+    coordinator.api_client.search_stations = AsyncMock(
+        return_value=[{"id": "stop_area:SNCF:87611301", "name": "L'Isle-Jourdain"}]
+    )
+    with _now(), patch("custom_components.sncf_trains.coordinator.asyncio.sleep"):
+        data = await coordinator._async_update_data()
+
+    assert data == {"sub": []}
+    assert coordinator.api_client.fetch_journeys.await_count == 1
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "invalid_journey_sub")
