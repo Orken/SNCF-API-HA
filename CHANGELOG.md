@@ -2,6 +2,11 @@
 
 Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), basé sur la 1.3.3.
 
+## 2.1.3
+
+### Corrections
+- **Nouveaux identifiants de gare SNCF** (sans code UIC, par exemple `stop_area:SNC:FR::LMO:…`) : la « gare d'arrivée non desservie » et les horaires corrigés d'un train très en retard n'étaient plus reconnus avec ces identifiants. Les arrêts sont maintenant comparés à ceux que le train dessert réellement.
+
 ## 2.1.2
 
 ### Corrections

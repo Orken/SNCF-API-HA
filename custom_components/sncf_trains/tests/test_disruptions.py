@@ -228,6 +228,33 @@ def test_merge_overtaken_late_train_is_delayed_not_cancelled():
     assert late["sections"][1]["departure_date_time"] == "20261014T084700"
 
 
+def test_merge_overtaken_late_train_with_new_station_ids():
+    """New SNCF ids carry no UIC code: the journey's stop points are used."""
+    realtime = [_journey("870306", "20261014T094900")]
+    late = _journey("870304", "20261014T084700")
+    late["sections"][1]["from"] = {"stop_point": {"id": "stop_point:SNCF:1:Train"}}
+    late["sections"][1]["to"] = {"stop_point": {"id": "stop_point:SNCF:2:Train"}}
+    attach_disruptions(
+        [late],
+        [
+            _late_disruption(
+                "870304", [("1", "084700", "100500"), ("2", "092800", "104600")]
+            )
+        ],
+    )
+
+    merged = merge_with_schedule(
+        realtime,
+        [late],
+        "stop_area:SNC:FR::LMO:7099a8b0-cb0a-11e8-8bfa-f784c1c7c611:",
+        departure_id="stop_area:SNC:FR::LMU:68ce1d50-cb0a-11e8-8bfa-f784c1c7c611:",
+    )
+
+    assert merged[0][KEY_STATUS] == STATUS_DELAYED
+    assert merged[0]["departure_date_time"] == "20261014T100500"
+    assert merged[0]["arrival_date_time"] == "20261014T104600"
+
+
 def test_merge_overtaken_late_train_without_amended_times_is_delayed():
     realtime = [_journey("870306", "20261014T094900")]
     late = _journey("870304", "20261014T084700")
