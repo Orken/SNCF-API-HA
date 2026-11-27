@@ -2,6 +2,11 @@
 
 Fork de [Master13011/SNCF-API-HA](https://github.com/Master13011/SNCF-API-HA), basé sur la 1.3.3.
 
+## 2.1.2
+
+### Corrections
+- **Gare refusée par l'API (« The entry point: … is not valid »)** : quand l'API SNCF ne reconnaît plus l'identifiant d'une gare, celle-ci est recherchée de nouveau par son nom et le trajet est mis à jour tout seul. Si la gare reste introuvable (travaux, ligne fermée), la réparation l'explique et disparaît dès que la gare est de nouveau desservie.
+
 ## 2.1.1
 
 ### Corrections
